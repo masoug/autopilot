@@ -44,7 +44,10 @@ int main()
         const auto& gyro = imu.getGyro();
         const auto& acc = imu.getAcc();
         ekf.step(gyro, acc, 0.01);
+
         const auto& nav = ekf.getState();
+        const auto& ekf_meas = ekf.getMeasurement();
+        const auto& ekf_grav = ekf.getModeledGravity();
 
         // TODO Guidance
         // TODO Control

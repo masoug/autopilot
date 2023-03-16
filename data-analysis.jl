@@ -8,34 +8,20 @@ using InteractiveUtils
 begin
 	using CSV
 	using DataFrames
-	using ForwardDiff
-	using LinearAlgebra
 	using Plots
 	using Rotations
 end
 
-# ╔═╡ 01f106ab-47f8-4175-972d-cba05add7833
-using Symbolics
-
-# ╔═╡ dee4d1fa-bb8a-11ed-1bc1-fff3f486280d
+# ╔═╡ 79554459-0064-4806-808e-bdebf5a2cce2
 md"""
-# State Estimation with the Extended Kalman Filter
-The extended kalman filter (EKF) is a very popular method for state estimation. It provides a framework for combining the strengths of multiple different sensors such that the resulting _combined state estimate_ is more accurate compared to reading each sensor individually. This practice of combining multiple sensors readings is commonly known as _sensor fusion_.
-
-In this notebook we'll build a simple EKF to estimate the 3D orientation of our vehicle using an angular rate-gyro and an accelerometer.
+# Hardware-in-the-Loop Analysis
 """
 
 # ╔═╡ bd12a7a7-709b-46c4-b364-76e58224c032
 begin
-	imu_data = Matrix(CSV.read("imu-dataset/axial.csv", DataFrame, header=false))
-	imu_data[:, 1] .-= imu_data[1, 1]
+	imu_data = Matrix(CSV.read("imu-dataset/axial-hil.csv", DataFrame, header=false))
 	imu_data
 end
-
-# ╔═╡ a2bca4bc-b9c3-47f4-bef5-8c6b5e52eb41
-md"""
-As always--the first rule of robotics is to plot your sensor data first. Get a feel for what kind of information you'll be working with.
-"""
 
 # ╔═╡ d09c9c28-e5dc-43f2-be1c-5c7be58c5bff
 function plot_raw_imu(imu_data)
@@ -54,259 +40,47 @@ end
 # ╔═╡ 480a41a6-8533-4092-8f30-ebc111f949c6
 plot_raw_imu(imu_data)
 
-# ╔═╡ 666c6045-1984-4988-a2fa-e153fbac05c8
-md"""
-This dataset is a simple test of rotating +-90 degrees back-and-forth along each axis (roll, then pitch, then yaw) so it should be pretty straightforward to check if our filter is generating the right output. The IMU is mounted to the vehicle such that $+X$ faces northward, while $+Y$ points eastward, and $+Z$ points downwards ([NED system](https://www.mathworks.com/help/aeroblks/about-aerospace-coordinate-systems.html#f3-23161)), assuming the vehicle is facing the north pole and level on the ground. This system is commonly used for flying vehicles like airplanes and rockets because the axes correspond intuitively to roll (rotate right w.r.t. pilot frame), pitch (tilt upwards), and yaw (spin rightwards) actions.
-
-We also note here that the gravity vector is measured by the imu normal to the earth's surface. This convention will be helpful for us to correct pitch and roll estimates (but not yaw, because that is unobserved by the gravity vector).
-"""
-
-# ╔═╡ 1415aaef-0709-4bdd-9175-f6e2939acbb6
-md"""
-### Prediction plus Correction
-Every Kalman Filter in the world follows two rules: First _predict_ the next state given some underlying dynamics model. Then _correct_ that prediction with some unbiased measurement. For our case, we can use the gyroscope measurements to _predict_ our attitude by integrating the angular rates. We can then use the accelerometer's gravity measurement to _correct_ our predictions.
-
-This leverages the best of both worlds because the gyro predictions will drift over time due to integration errors, which the accelerometer will correct with it's unbiased gravity measurements. On the other hand, the accelerometer's noisy gravity measurements can be filtered out by the smoothing effects when integrating angular rates from the gyro.
-"""
-
-# ╔═╡ f0cc0ab4-ea55-412b-abf2-0eb06f275fe6
-# Prediction function: Our system's state is just the attitude quaternion [w x y z] where `w` is the real component and `x, y, z` are the imaginary axes.
-function predict(q, ω, Δt)
-	# Big idea: Predict the next state by integrating angular rates `ω` by `Δt`, and adding that to current_state `q`.
-	Ω = [0    -ω[1] -ω[2] -ω[3];
-	     ω[1]  0     ω[3] -ω[2];
-	     ω[2] -ω[3]  0     ω[1];
-		 ω[3]  ω[2] -ω[1]  0   ]
-	
-	# Here we use a linearized approximation of the Euler-Rodrigues rotation formula to compute the predicted quaternion.
-	return (I + 0.5*Δt*Ω)*q
-end
-
-# ╔═╡ 709e4458-275e-4fd8-8a3d-3de8cebf9110
-md"""
-This implementation here is based on a [linearized approximation of the Euler-Rodrigues rotation formula](https://ahrs.readthedocs.io/en/latest/filters/ekf.html#prediction-step), which tells us how to apply integrated angular rates to a given quaternion. Follow the link for more details about how the linearized form was derived. The linearized approximation is suitable for implementing this filter on low-compute embedded platforms.
-"""
+# ╔═╡ 958781d6-a2e3-41b7-a660-58b49607bb71
+quat2rvec_deg(q) = collect(57.2958 * Rotations.params(RotationVec(QuatRotation(q))))
 
 # ╔═╡ 38d13e33-1241-488a-8a98-019a24895bd8
+plot(imu_data[:, 1],
+	 reduce(vcat, map(quat2rvec_deg, eachrow(imu_data[:, 8:11]))'),
+	 label=["x" "y" "z"],
+	 title="EKF Attitude Trajectory",
+	 xlabel="Time (sec)", ylabel="Magnitude (deg)")
+
+# ╔═╡ 993984e9-66a0-4c21-96a3-b2cf81665eec
+# ╠═╡ disabled = true
+#=╠═╡
 begin
-	# Initial state is identity quaternion
-	local q = [1; 0; 0; 0]
-	local trajectory = zeros(size(imu_data, 1), 3)
-	for i = 1:size(imu_data, 1)
-		q = predict(q, imu_data[i, 2:4], 0.01)
-		
-		trajectory[i, :] = 57.2958 * Rotations.params(RotationVec(QuatRotation(q)))
-	end
-
-	plot(trajectory, label=["x" "y" "z"], ylabel="Angle (deg)")
+	meas = plot(imu_data[:, 1],
+				imu_data[:, 12:14],
+				label=["x" "y" "z"],
+				title="Accelerometer",
+				xlabel="Time (sec)", ylabel="Magnitude")
+	modl = plot(imu_data[:, 1],
+				imu_data[:, 15:17],
+				label=["x" "y" "z"],
+				title="Measurement Model",
+				xlabel="Time (sec)", ylabel="Magnitude")
+	plot(meas, modl, layout=(2,1))
 end
-
-# ╔═╡ a2c2c14a-5221-4cab-b9b4-9347b57fa284
-md"""
-Sweet! Looks like our `predict()` formula is on the right track--it reports our rotations as we expect: A series of +-90° rotations along the roll, pitch, and yaw axes.
-
-We also need to track our uncertainty associated with this prediction, which is given by $P_{predicted} = F_{prev}P_{prev}F_{prev}^T + Q$ where $P$ is the prediction uncertainty, $F$ is the jacobian of our `predict()`-tion model, and $Q$ is the process noise--i.e. how much uncertainty is injected by gyro measurement noise?
-"""
-
-# ╔═╡ 4b744b76-bd4c-403a-b7c9-6a4f462cc17d
-function prediction_noise(prev_noise, q, σ, ω, Δt)
-	# Compute `prediction()` jacobian (w.r.t. quaternion)
-	F = [       1    -0.5*Δt*ω[1] -0.5*Δt*ω[2] -0.5*Δt*ω[3];
-	     0.5*Δt*ω[1]         1     0.5*Δt*ω[3] -0.5*Δt*ω[2];
-	     0.5*Δt*ω[2] -0.5*Δt*ω[3]         1     0.5*Δt*ω[1];
-	     0.5*Δt*ω[3]  0.5*Δt*ω[2] -0.5*Δt*ω[1]         1   ]
-
-	# compute approximated matrix exponential jacobian w.r.t. ω
-	W = 0.5*Δt*[-q[2] -q[3] -q[4];
-	             q[1] -q[4]  q[3];
-	             q[4]  q[1] -q[2];
-	            -q[3]  q[2]  q[1]]
-
-	# compute process noise
-	Q = σ^2*W*W'
-
-	# compute prediction noise
-	return F*prev_noise*F' + Q
-end
-
-# ╔═╡ 57898f21-a006-4f57-b5de-d79f333c79ea
-md"""
-Details behind this formula derivation can be found at the same place where the prediction model was derived: [https://ahrs.readthedocs.io/en/latest/filters/ekf.html#prediction-step](https://ahrs.readthedocs.io/en/latest/filters/ekf.html#prediction-step)
-
-For now, we'll move onto the correction step: Recall the correction step of a Kalman Filter applies a scaled error to shift the estimate towards the measured state. The amount of shifting is the Kalman gain, which is a function of the prediction and measurement noises. This weights the measurement versus the prediction depending on whichever is more certain.
-
-Thus we need a measurement model, i.e. a mapping from a predicted state to what the sensor produces. Here our accelerometer produces a 3D vector descrbing where the gravity vector is pointing, so our measurement model must compute where the gravity vector should point given the current smoothed attitude.
-"""
-
-# ╔═╡ 1fcb3e87-e0e7-4211-809d-fa041194d7e0
-function quat2mat(q)
-	qᵣ = q[1]
-    qᵢ = q[2]
-    qⱼ = q[3]
-    qₖ = q[4]
-    qᵢ² = qᵢ*qᵢ
-    qⱼ² = qⱼ*qⱼ
-    qₖ² = qₖ*qₖ
-    return [1.0-2.0*(qⱼ²+qₖ²)          2.0*(qᵢ*qⱼ-qₖ*qᵣ)     2.0*(qᵢ*qₖ+qⱼ*qᵣ);
-		        2.0*(qᵢ*qⱼ+qₖ*qᵣ)  1.0-2.0*(qᵢ²+qₖ²)         2.0*(qⱼ*qₖ-qᵢ*qᵣ);
-		        2.0*(qᵢ*qₖ-qⱼ*qᵣ)      2.0*(qⱼ*qₖ+qᵢ*qᵣ) 1.0-2.0*(qᵢ²+qⱼ²)    ]
-end
-
-# ╔═╡ 08c6d36c-1aeb-4464-a422-6c2e351b3e45
-function measurement_model(q, gravity=[0; 0; -1])
-	# We can compute where the gravity vector is pointing by simply rotating a unit-z vector representing gravity in the `q_predicted` direction
-	return quat2mat(q)'*gravity
-end
-
-# ╔═╡ c6aaddec-195b-45c9-961c-c6d2dba1d7f0
-md"""
-Next we can start working on the correction equations, which use the measurement model (and its jacobian `H`) to apply the shift. The actual jacobian for quaternion rotation is kinda nasty so we'll cheat and use auto-differentiation shortcuts for brevity.
-"""
-
-# ╔═╡ ba4c1fd0-ccc8-4e80-b791-697c099560b1
-measurement_model_jac(q) = ForwardDiff.jacobian(measurement_model, q)
-
-# ╔═╡ 1eaa45d0-6062-48c1-a12b-e49d448e31c8
-function correction(q_predicted, q_noise, observed_g, observation_noise)
-	# normalize the observed gravity vector since we don't care about magnitude
-	z = observed_g/norm(observed_g)
-
-	# compute observation error w.r.t. predicted state
-	error = z - measurement_model(q_predicted)
-
-	# evaluate measurement model jacobian at the predicted state
-	H = measurement_model_jac(q_predicted)
-
-	# construct the measurement noise covariance matrix
-	R = observation_noise*I
-
-	# calculate kalman gain
-	S = H*q_noise*H' + R
-	K = q_noise*H'*inv(S)
-
-	# apply the correction
-	corrected_q = q_predicted + K*error
-	normalized_q = corrected_q/norm(corrected_q)
-
-	# compute updated covariance
-	P = (I-K*H)*q_noise
-
-	return normalized_q, P
-end
-
-# ╔═╡ da333b96-ee17-42f0-b260-7e3fabb4aa58
-md"""
-Now we can re-run the same experiment for `predict()`, except this time we'll apply `correction()`s from the accelerometer:
-"""
-
-# ╔═╡ f1780048-3c9d-43b6-b47f-ef157b3781fc
-begin
-	# Initial state is identity quaternion
-	local q = [1; 0; 0; 0]
-
-	# initialize noise covariances
-	local prev_noise = Matrix(I, 4, 4)
-
-	# noise parameters
-	# tune these numbers against a dataset to get the best state estimates
-	gyro_noise = 0.3
-	accel_noise = 3
-	
-	local trajectory = zeros(size(imu_data, 1), 5)
-	for i = 1:size(imu_data, 1)
-		ω = imu_data[i, 2:4]
-
-		# predict!
-		q_pred = predict(q, ω, 0.01)
-		pred_noise = prediction_noise(prev_noise, q, gyro_noise, ω, 0.01)
-
-		# correct!
-		obs_g = imu_data[i, 5:7]
-		update = correction(q_pred, pred_noise, obs_g, accel_noise)
-
-		q = update[1]
-		prev_noise = update[2]
-
-		trajectory[i, 1] = i*0.01
-		trajectory[i, 2:4] = 57.2958 * Rotations.params(RotationVec(QuatRotation(q)))
-		trajectory[i, 5] = tr(prev_noise)
-	end
-
-	angles = plot(trajectory[:, 1], trajectory[:, 2:4],
-		          label=["x" "y" "z"],
-		          ylabel="Angle (deg)")
-	cov = plot(trajectory[:, 1], trajectory[:, 5],
-		       label="Covariance Trace")
-	plot(angles, cov, layout=(2, 1))
-end
-
-# ╔═╡ 89dc0559-3e82-4307-8958-4d126941479f
-md"""
-Awesome! Our roll-pitch-yaw graph looks very similar to the one before with the added benefit from the gravity measurements keeping the roll and pitch axes converged. It takes a little bit of finagling with the noise parameters to get good filter performance because the sensors are rarely exactly characterized in pure Gaussian models. So instead of calibrating sensors to extreme precision, we can simply tune the filter noise parameters such that the resulting state estimates match ground-truth as best we can. 
-"""
-
-# ╔═╡ a68e2348-2d4e-4513-ade0-a18e328e2a3e
-begin
-	@variables q[1:4] omega[1:3] delta_t
-	q = collect(q)
-	omega = collect(omega)
-	predict_sym = predict(q, omega, delta_t)
-end
-
-# ╔═╡ d159b9ad-f11d-4665-ade1-6cf95d52e607
-predict_jac_sym = Symbolics.jacobian(predict_sym, q)
-
-# ╔═╡ d043e7fd-fb9e-465d-89ec-68776e8860eb
-print(build_function(predict_jac_sym,
-	                 omega, delta_t,
-					 target=Symbolics.CTarget()))
-
-# ╔═╡ 31ee84a2-619e-4983-a6ca-11fa0bcaa795
-begin
-	@variables prev_noise[1:4, 1:4] σgyro
-	prev_noise = collect(prev_noise)
-	pred_noise_sym = prediction_noise(prev_noise, q, σgyro, omega, delta_t)
-end
-
-# ╔═╡ 355219bc-89bc-4312-8360-0a3c131f4748
-print(build_function(quat2mat(q),
-	                 q,
-					 target=Symbolics.CTarget()))
-
-# ╔═╡ 26a7d6c3-3713-4047-83f5-3b0b0d4d4b6d
-begin
-	@variables g[1:3]
-	g = collect(g)
-	measurement_model_expr = measurement_model(q, g)
-end
-
-# ╔═╡ e1188e8a-038d-43ed-9a1f-0f5e5b1c021b
-
-	measurement_model_jac_expr = Symbolics.jacobian(measurement_model_expr, q)
-
-# ╔═╡ 48354253-d4f8-4d0a-a292-f1f540af2afb
-print(build_function(measurement_model_jac_expr,
-	                 q, g,
-					 target=Symbolics.CTarget()))
+  ╠═╡ =#
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
-ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
-LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 Rotations = "6038ab10-8711-5258-84ad-4b1120ba62dc"
-Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
 
 [compat]
 CSV = "~0.10.9"
 DataFrames = "~1.5.0"
-ForwardDiff = "~0.10.35"
 Plots = "~1.38.7"
 Rotations = "~1.4.0"
-Symbolics = "~5.1.0"
 """
 
 # ╔═╡ 00000000-0000-0000-0000-000000000002
@@ -315,45 +89,17 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.8.3"
 manifest_format = "2.0"
-project_hash = "256d498f3fc0c3c0e2679a343726cfb13c541309"
-
-[[deps.AbstractAlgebra]]
-deps = ["GroupsCore", "InteractiveUtils", "LinearAlgebra", "MacroTools", "Markdown", "Random", "RandomExtensions", "SparseArrays", "Test"]
-git-tree-sha1 = "29e65c331f97db9189ef00a4c7aed8127c2fd2d4"
-uuid = "c3fe647b-3220-5bb0-a1ea-a7954cac585d"
-version = "0.27.10"
-
-[[deps.AbstractTrees]]
-git-tree-sha1 = "faa260e4cb5aba097a73fab382dd4b5819d8ec8c"
-uuid = "1520ce14-60c1-5f80-bbc7-55ef81b5835c"
-version = "0.4.4"
-
-[[deps.Adapt]]
-deps = ["LinearAlgebra", "Requires"]
-git-tree-sha1 = "cc37d689f599e8df4f464b2fa3870ff7db7492ef"
-uuid = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
-version = "3.6.1"
+project_hash = "de4e84bf5222e78b4a00b23cebe0defee218a4ba"
 
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
 version = "1.1.1"
-
-[[deps.ArrayInterface]]
-deps = ["Adapt", "LinearAlgebra", "Requires", "SnoopPrecompile", "SparseArrays", "SuiteSparse"]
-git-tree-sha1 = "a89acc90c551067cd84119ff018619a1a76c6277"
-uuid = "4fba245c-0d91-5ea0-9b3e-6abc04ee57a9"
-version = "7.2.1"
 
 [[deps.Artifacts]]
 uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
 
 [[deps.Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
-
-[[deps.Bijections]]
-git-tree-sha1 = "fe4f8c5ee7f76f2198d5c2a06d3961c249cce7bd"
-uuid = "e2ed5e7c-b2de-5872-ae92-c73ca462fb04"
-version = "0.1.4"
 
 [[deps.BitFlags]]
 git-tree-sha1 = "43b1a4a8f797c1cddadf60499a8a077d4af2cd2d"
@@ -377,12 +123,6 @@ deps = ["Artifacts", "Bzip2_jll", "CompilerSupportLibraries_jll", "Fontconfig_jl
 git-tree-sha1 = "4b859a208b2397a7a623a03449e4636bdb17bcf2"
 uuid = "83423d85-b0ee-5818-9007-b63ccbeb887a"
 version = "1.16.1+1"
-
-[[deps.Calculus]]
-deps = ["LinearAlgebra"]
-git-tree-sha1 = "f641eb0a4f00c343bbc32346e1217b86f3ce9dad"
-uuid = "49dc2e85-a5d0-5ad3-a950-438e2897f1b9"
-version = "0.5.1"
 
 [[deps.ChainRulesCore]]
 deps = ["Compat", "LinearAlgebra", "SparseArrays"]
@@ -426,22 +166,6 @@ git-tree-sha1 = "fc08e5930ee9a4e03f84bfb5211cb54e7769758a"
 uuid = "5ae59095-9a9b-59fe-a467-6f913c188581"
 version = "0.12.10"
 
-[[deps.Combinatorics]]
-git-tree-sha1 = "08c8b6831dc00bfea825826be0bc8336fc369860"
-uuid = "861a8166-3701-5b0c-9a16-15d98fcdc6aa"
-version = "1.0.2"
-
-[[deps.CommonSolve]]
-git-tree-sha1 = "9441451ee712d1aec22edad62db1a9af3dc8d852"
-uuid = "38540f10-b2f7-11e9-35d8-d573e4eb0ff2"
-version = "0.2.3"
-
-[[deps.CommonSubexpressions]]
-deps = ["MacroTools", "Test"]
-git-tree-sha1 = "7b8a93dba8af7e3b42fecabf646260105ac373f7"
-uuid = "bbf7d656-a473-5ed7-a52c-81e309532950"
-version = "0.3.0"
-
 [[deps.Compat]]
 deps = ["Dates", "LinearAlgebra", "UUIDs"]
 git-tree-sha1 = "7a60c856b9fa189eb34f5f8a6f6b5529b7942957"
@@ -452,17 +176,6 @@ version = "4.6.1"
 deps = ["Artifacts", "Libdl"]
 uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
 version = "0.5.2+0"
-
-[[deps.CompositeTypes]]
-git-tree-sha1 = "02d2316b7ffceff992f3096ae48c7829a8aa0638"
-uuid = "b152e2b5-7a66-4b01-a709-34e65c35f657"
-version = "0.1.3"
-
-[[deps.ConstructionBase]]
-deps = ["LinearAlgebra"]
-git-tree-sha1 = "89a9db8d28102b094992472d333674bd1a83ce2a"
-uuid = "187b0558-2788-49d3-abe0-74a17ed4e7c9"
-version = "1.5.1"
 
 [[deps.Contour]]
 git-tree-sha1 = "d05d9e7b7aedff4e5b51a029dced05cfb6125781"
@@ -504,78 +217,22 @@ uuid = "ade2ca70-3891-5945-98fb-dc099432e06a"
 deps = ["Mmap"]
 uuid = "8bb1440f-4735-579b-a4ab-409b98df4dab"
 
-[[deps.DensityInterface]]
-deps = ["InverseFunctions", "Test"]
-git-tree-sha1 = "80c3e8639e3353e5d2912fb3a1916b8455e2494b"
-uuid = "b429d917-457f-4dbc-8f4c-0cc954292b1d"
-version = "0.4.0"
-
-[[deps.DiffResults]]
-deps = ["StaticArraysCore"]
-git-tree-sha1 = "782dd5f4561f5d267313f23853baaaa4c52ea621"
-uuid = "163ba53b-c6d8-5494-b064-1a9d43ac40c5"
-version = "1.1.0"
-
-[[deps.DiffRules]]
-deps = ["IrrationalConstants", "LogExpFunctions", "NaNMath", "Random", "SpecialFunctions"]
-git-tree-sha1 = "a4ad7ef19d2cdc2eff57abbbe68032b1cd0bd8f8"
-uuid = "b552c78f-8df3-52c6-915a-8e097449b14b"
-version = "1.13.0"
-
-[[deps.Distributed]]
-deps = ["Random", "Serialization", "Sockets"]
-uuid = "8ba89e20-285c-5b6f-9357-94700520ee1b"
-
-[[deps.Distributions]]
-deps = ["ChainRulesCore", "DensityInterface", "FillArrays", "LinearAlgebra", "PDMats", "Printf", "QuadGK", "Random", "SparseArrays", "SpecialFunctions", "Statistics", "StatsBase", "StatsFuns", "Test"]
-git-tree-sha1 = "da9e1a9058f8d3eec3a8c9fe4faacfb89180066b"
-uuid = "31c24e10-a181-5473-b8eb-7969acd0382f"
-version = "0.25.86"
-
 [[deps.DocStringExtensions]]
 deps = ["LibGit2"]
 git-tree-sha1 = "2fb1e02f2b635d0845df5d7c167fec4dd739b00d"
 uuid = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 version = "0.9.3"
 
-[[deps.DomainSets]]
-deps = ["CompositeTypes", "IntervalSets", "LinearAlgebra", "Random", "StaticArrays", "Statistics"]
-git-tree-sha1 = "988e2db482abeb69efc76ae8b6eba2e93805ee70"
-uuid = "5b8099bc-c8ec-5219-889f-1d9e522a28bf"
-version = "0.5.15"
-
 [[deps.Downloads]]
 deps = ["ArgTools", "FileWatching", "LibCURL", "NetworkOptions"]
 uuid = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 version = "1.6.0"
-
-[[deps.DualNumbers]]
-deps = ["Calculus", "NaNMath", "SpecialFunctions"]
-git-tree-sha1 = "5837a837389fccf076445fce071c8ddaea35a566"
-uuid = "fa6b7ba4-c1ee-5f82-b5fc-ecf0adba8f74"
-version = "0.6.8"
-
-[[deps.DynamicPolynomials]]
-deps = ["DataStructures", "Future", "LinearAlgebra", "MultivariatePolynomials", "MutableArithmetics", "Pkg", "Reexport", "Test"]
-git-tree-sha1 = "8b84876e31fa39479050e2d3395c4b3b210db8b0"
-uuid = "7c1d4256-1411-5781-91ec-d7bc3513ac07"
-version = "0.4.6"
-
-[[deps.EnumX]]
-git-tree-sha1 = "bdb1942cd4c45e3c678fd11569d5cccd80976237"
-uuid = "4e289a0a-7415-4d19-859d-a7e5c4648b56"
-version = "1.0.4"
 
 [[deps.Expat_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "bad72f730e9e91c08d9427d5e8db95478a3c323d"
 uuid = "2e619515-83b5-522b-bb60-26c02a35a201"
 version = "2.4.8+0"
-
-[[deps.ExprTools]]
-git-tree-sha1 = "c1d06d129da9f55715c6c212866f5b1bddc5fa00"
-uuid = "e2ba6199-217a-4e67-a87a-7c52f15ade04"
-version = "0.1.9"
 
 [[deps.FFMPEG]]
 deps = ["FFMPEG_jll"]
@@ -598,12 +255,6 @@ version = "0.9.20"
 [[deps.FileWatching]]
 uuid = "7b1f6079-737a-58dc-b8bc-7a2ca5c1b5ee"
 
-[[deps.FillArrays]]
-deps = ["LinearAlgebra", "Random", "SparseArrays", "Statistics"]
-git-tree-sha1 = "d3ba08ab64bdfd27234d3f61956c966266757fe6"
-uuid = "1a297f60-69ca-5386-bcde-b61e274b549b"
-version = "0.13.7"
-
 [[deps.FixedPointNumbers]]
 deps = ["Statistics"]
 git-tree-sha1 = "335bfdceacc84c5cdf16aadc768aa5ddfc5383cc"
@@ -622,12 +273,6 @@ git-tree-sha1 = "8339d61043228fdd3eb658d86c926cb282ae72a8"
 uuid = "59287772-0a20-5a39-b81b-1366585eb4c0"
 version = "0.4.2"
 
-[[deps.ForwardDiff]]
-deps = ["CommonSubexpressions", "DiffResults", "DiffRules", "LinearAlgebra", "LogExpFunctions", "NaNMath", "Preferences", "Printf", "Random", "SpecialFunctions", "StaticArrays"]
-git-tree-sha1 = "00e252f4d706b3d55a8863432e742bf5717b498d"
-uuid = "f6369f11-7733-5829-9624-2563aa707210"
-version = "0.10.35"
-
 [[deps.FreeType2_jll]]
 deps = ["Artifacts", "Bzip2_jll", "JLLWrappers", "Libdl", "Pkg", "Zlib_jll"]
 git-tree-sha1 = "87eb71354d8ec1a96d4a7636bd57a7347dde3ef9"
@@ -640,17 +285,6 @@ git-tree-sha1 = "aa31987c2ba8704e23c6c8ba8a4f769d5d7e4f91"
 uuid = "559328eb-81f9-559d-9380-de523a88c83c"
 version = "1.0.10+0"
 
-[[deps.FunctionWrappers]]
-git-tree-sha1 = "d62485945ce5ae9c0c48f124a84998d755bae00e"
-uuid = "069b7b12-0de2-55c6-9aab-29f3d0a68a2e"
-version = "1.1.3"
-
-[[deps.FunctionWrappersWrappers]]
-deps = ["FunctionWrappers"]
-git-tree-sha1 = "b104d487b34566608f8b4e1c39fb0b10aa279ff8"
-uuid = "77dc65aa-8811-40c2-897b-53d922fa7daf"
-version = "0.1.3"
-
 [[deps.Future]]
 deps = ["Random"]
 uuid = "9fa8497b-333b-5362-9e8d-4d0656e87820"
@@ -660,12 +294,6 @@ deps = ["Artifacts", "JLLWrappers", "Libdl", "Libglvnd_jll", "Pkg", "Xorg_libXcu
 git-tree-sha1 = "d972031d28c8c8d9d7b41a536ad7bb0c2579caca"
 uuid = "0656b61e-2033-5cc2-a64a-77c0f6c09b89"
 version = "3.3.8+0"
-
-[[deps.GPUArraysCore]]
-deps = ["Adapt"]
-git-tree-sha1 = "1cd7f0af1aa58abc02ea1d872953a97359cb87fa"
-uuid = "46192b85-c4d5-4398-a991-12ede77f4527"
-version = "0.1.4"
 
 [[deps.GR]]
 deps = ["Artifacts", "Base64", "DelimitedFiles", "Downloads", "GR_jll", "HTTP", "JSON", "Libdl", "LinearAlgebra", "Pkg", "Preferences", "Printf", "Random", "Serialization", "Sockets", "TOML", "Tar", "Test", "UUIDs", "p7zip_jll"]
@@ -702,18 +330,6 @@ git-tree-sha1 = "53bb909d1151e57e2484c3d1b53e19552b887fb2"
 uuid = "42e2da0e-8278-4e71-bc24-59509adca0fe"
 version = "1.0.2"
 
-[[deps.Groebner]]
-deps = ["AbstractAlgebra", "Combinatorics", "Logging", "MultivariatePolynomials", "Primes", "Random"]
-git-tree-sha1 = "47f0f03eddecd7ad59c42b1dd46d5f42916aff63"
-uuid = "0b43b601-686d-58a3-8a1c-6623616c7cd4"
-version = "0.2.11"
-
-[[deps.GroupsCore]]
-deps = ["Markdown", "Random"]
-git-tree-sha1 = "9e1a5e9f3b81ad6a5c613d181664a0efc6fe6dd7"
-uuid = "d5909c97-4eac-4ecc-a3dc-fdd0858a4120"
-version = "0.4.0"
-
 [[deps.HTTP]]
 deps = ["Base64", "CodecZlib", "Dates", "IniFile", "Logging", "LoggingExtras", "MbedTLS", "NetworkOptions", "OpenSSL", "Random", "SimpleBufferStream", "Sockets", "URIs", "UUIDs"]
 git-tree-sha1 = "37e4657cd56b11abe3d10cd4a1ec5fbdb4180263"
@@ -726,17 +342,6 @@ git-tree-sha1 = "129acf094d168394e80ee1dc4bc06ec835e510a3"
 uuid = "2e76f6c2-a576-52d4-95c1-20adfe4de566"
 version = "2.8.1+1"
 
-[[deps.HypergeometricFunctions]]
-deps = ["DualNumbers", "LinearAlgebra", "OpenLibm_jll", "SpecialFunctions", "Test"]
-git-tree-sha1 = "709d864e3ed6e3545230601f94e11ebc65994641"
-uuid = "34004b35-14d8-5ef3-9330-4cdb6864b03a"
-version = "0.3.11"
-
-[[deps.IfElse]]
-git-tree-sha1 = "debdd00ffef04665ccbb3e150747a77560e8fad1"
-uuid = "615f187c-cbe4-4ef1-ba3b-2fcf58d6d173"
-version = "0.1.1"
-
 [[deps.IniFile]]
 git-tree-sha1 = "f550e6e32074c939295eb5ea6de31849ac2c9625"
 uuid = "83e8ac13-25f8-5344-8a64-a9f2b223428f"
@@ -748,20 +353,9 @@ git-tree-sha1 = "9cc2baf75c6d09f9da536ddf58eb2f29dedaf461"
 uuid = "842dd82b-1e85-43dc-bf29-5d0ee9dffc48"
 version = "1.4.0"
 
-[[deps.IntegerMathUtils]]
-git-tree-sha1 = "f366daebdfb079fd1fe4e3d560f99a0c892e15bc"
-uuid = "18e54dd8-cb9d-406c-a71d-865a43cbb235"
-version = "0.1.0"
-
 [[deps.InteractiveUtils]]
 deps = ["Markdown"]
 uuid = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
-
-[[deps.IntervalSets]]
-deps = ["Dates", "Random", "Statistics"]
-git-tree-sha1 = "3f91cd3f56ea48d4d2a75c2a65455c5fc74fa347"
-uuid = "8197267c-284f-5f27-9208-e0e47529a953"
-version = "0.7.3"
 
 [[deps.InverseFunctions]]
 deps = ["Test"]
@@ -831,28 +425,11 @@ git-tree-sha1 = "f2355693d6778a178ade15952b7ac47a4ff97996"
 uuid = "b964fa9f-0449-5b57-a5c2-d3ea65f4040f"
 version = "1.3.0"
 
-[[deps.LabelledArrays]]
-deps = ["ArrayInterface", "ChainRulesCore", "ForwardDiff", "LinearAlgebra", "MacroTools", "PreallocationTools", "RecursiveArrayTools", "StaticArrays"]
-git-tree-sha1 = "cd04158424635efd05ff38d5f55843397b7416a9"
-uuid = "2ee39098-c373-598a-b85f-a56591580800"
-version = "1.14.0"
-
-[[deps.LambertW]]
-git-tree-sha1 = "c5ffc834de5d61d00d2b0e18c96267cffc21f648"
-uuid = "984bce1d-4616-540c-a9ee-88d1112d94c9"
-version = "0.4.6"
-
 [[deps.Latexify]]
 deps = ["Formatting", "InteractiveUtils", "LaTeXStrings", "MacroTools", "Markdown", "OrderedCollections", "Printf", "Requires"]
 git-tree-sha1 = "2422f47b34d4b127720a18f86fa7b1aa2e141f29"
 uuid = "23fbe1c1-3f47-55db-b15f-69d7ec21a316"
 version = "0.15.18"
-
-[[deps.Lazy]]
-deps = ["MacroTools"]
-git-tree-sha1 = "1370f8202dac30758f3c345f9909b97f53d87d3f"
-uuid = "50d2b5c4-7a5e-59d5-8109-a42b560f39c0"
-version = "0.15.1"
 
 [[deps.LibCURL]]
 deps = ["LibCURL_jll", "MozillaCACerts_jll"]
@@ -982,18 +559,6 @@ uuid = "a63ad114-7e13-5084-954f-fe012c677804"
 uuid = "14a3606d-f60d-562e-9121-12d972cd8159"
 version = "2022.2.1"
 
-[[deps.MultivariatePolynomials]]
-deps = ["ChainRulesCore", "DataStructures", "LinearAlgebra", "MutableArithmetics"]
-git-tree-sha1 = "eaa98afe2033ffc0629f9d0d83961d66a021dfcc"
-uuid = "102ac46a-7ee4-5c85-9060-abc95bfdeaa3"
-version = "0.4.7"
-
-[[deps.MutableArithmetics]]
-deps = ["LinearAlgebra", "SparseArrays", "Test"]
-git-tree-sha1 = "3295d296288ab1a0a2528feb424b854418acff57"
-uuid = "d8a4904e-b15c-11e9-3269-09a3773c0cb0"
-version = "1.2.3"
-
 [[deps.NaNMath]]
 deps = ["OpenLibm_jll"]
 git-tree-sha1 = "0877504529a3e5c3343c6f8b4c0381e57e4387e4"
@@ -1054,12 +619,6 @@ deps = ["Artifacts", "Libdl"]
 uuid = "efcefdf7-47ab-520b-bdef-62a2eaa19f15"
 version = "10.40.0+0"
 
-[[deps.PDMats]]
-deps = ["LinearAlgebra", "SparseArrays", "SuiteSparse"]
-git-tree-sha1 = "67eae2738d63117a196f497d7db789821bce61d1"
-uuid = "90014a1f-27ba-587c-ab20-58faa44d9150"
-version = "0.11.17"
-
 [[deps.Parsers]]
 deps = ["Dates", "SnoopPrecompile"]
 git-tree-sha1 = "478ac6c952fddd4399e71d4779797c538d0ff2bf"
@@ -1106,12 +665,6 @@ git-tree-sha1 = "a6062fe4063cdafe78f4a0a81cfffb89721b30e7"
 uuid = "2dfb63ee-cc39-5dd5-95bd-886bf059d720"
 version = "1.4.2"
 
-[[deps.PreallocationTools]]
-deps = ["Adapt", "ArrayInterface", "ForwardDiff", "Requires"]
-git-tree-sha1 = "f739b1b3cc7b9949af3b35089931f2b58c289163"
-uuid = "d236fae5-4411-538c-8e31-a6e3d9e00b46"
-version = "0.4.12"
-
 [[deps.Preferences]]
 deps = ["TOML"]
 git-tree-sha1 = "47e5f437cc0e7ef2ce8406ce1e7e24d44915f88d"
@@ -1124,12 +677,6 @@ git-tree-sha1 = "96f6db03ab535bdb901300f88335257b0018689d"
 uuid = "08abe8d2-0d0c-5749-adfa-8a2ac140af0d"
 version = "2.2.2"
 
-[[deps.Primes]]
-deps = ["IntegerMathUtils"]
-git-tree-sha1 = "311a2aa90a64076ea0fac2ad7492e914e6feeb81"
-uuid = "27ebfcd6-29c5-5fa9-bf4b-fb8fc14df3ae"
-version = "0.5.3"
-
 [[deps.Printf]]
 deps = ["Unicode"]
 uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
@@ -1139,12 +686,6 @@ deps = ["Artifacts", "CompilerSupportLibraries_jll", "Fontconfig_jll", "Glib_jll
 git-tree-sha1 = "0c03844e2231e12fda4d0086fd7cbe4098ee8dc5"
 uuid = "ea2cea3b-5b76-57ae-a6ef-0a8af62496e1"
 version = "5.15.3+2"
-
-[[deps.QuadGK]]
-deps = ["DataStructures", "LinearAlgebra"]
-git-tree-sha1 = "786efa36b7eff813723c4849c90456609cf06661"
-uuid = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
-version = "2.8.1"
 
 [[deps.Quaternions]]
 deps = ["LinearAlgebra", "Random", "RealDot"]
@@ -1159,12 +700,6 @@ uuid = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
 [[deps.Random]]
 deps = ["SHA", "Serialization"]
 uuid = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
-
-[[deps.RandomExtensions]]
-deps = ["Random", "SparseArrays"]
-git-tree-sha1 = "062986376ce6d394b23d5d90f01d81426113a3c9"
-uuid = "fb686558-2515-59ef-acaa-46db3789a887"
-version = "0.4.3"
 
 [[deps.RealDot]]
 deps = ["LinearAlgebra"]
@@ -1184,12 +719,6 @@ git-tree-sha1 = "e974477be88cb5e3040009f3767611bc6357846f"
 uuid = "01d81517-befc-4cb6-b9ec-a95719d0359c"
 version = "0.6.11"
 
-[[deps.RecursiveArrayTools]]
-deps = ["Adapt", "ArrayInterface", "ChainRulesCore", "DocStringExtensions", "FillArrays", "GPUArraysCore", "IteratorInterfaceExtensions", "LinearAlgebra", "RecipesBase", "Requires", "StaticArraysCore", "Statistics", "SymbolicIndexingInterface", "Tables", "ZygoteRules"]
-git-tree-sha1 = "3dcb2a98436389c0aac964428a5fa099118944de"
-uuid = "731186ca-8d62-57ce-b412-fbd966d074cd"
-version = "2.38.0"
-
 [[deps.Reexport]]
 git-tree-sha1 = "45e428421666073eab6f2da5c9d310d99bb12f9b"
 uuid = "189a3867-3050-52da-a836-e630ba90ab69"
@@ -1207,45 +736,15 @@ git-tree-sha1 = "838a3a4188e2ded87a4f9f184b4b0d78a1e91cb7"
 uuid = "ae029012-a4dd-5104-9daa-d747884805df"
 version = "1.3.0"
 
-[[deps.Rmath]]
-deps = ["Random", "Rmath_jll"]
-git-tree-sha1 = "f65dcb5fa46aee0cf9ed6274ccbd597adc49aa7b"
-uuid = "79098fc4-a85e-5d69-aa6a-4863f24498fa"
-version = "0.7.1"
-
-[[deps.Rmath_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "6ed52fdd3382cf21947b15e8870ac0ddbff736da"
-uuid = "f50d1b31-88e8-58de-be2c-1cc44531875f"
-version = "0.4.0+0"
-
 [[deps.Rotations]]
 deps = ["LinearAlgebra", "Quaternions", "Random", "StaticArrays", "Statistics"]
 git-tree-sha1 = "72a6abdcd088764878b473102df7c09bbc0548de"
 uuid = "6038ab10-8711-5258-84ad-4b1120ba62dc"
 version = "1.4.0"
 
-[[deps.RuntimeGeneratedFunctions]]
-deps = ["ExprTools", "SHA", "Serialization"]
-git-tree-sha1 = "50314d2ef65fce648975a8e80ae6d8409ebbf835"
-uuid = "7e49a35a-f44a-4d26-94aa-eba1b4ca6b47"
-version = "0.5.5"
-
 [[deps.SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 version = "0.7.0"
-
-[[deps.SciMLBase]]
-deps = ["ArrayInterface", "CommonSolve", "ConstructionBase", "Distributed", "DocStringExtensions", "EnumX", "FunctionWrappersWrappers", "IteratorInterfaceExtensions", "LinearAlgebra", "Logging", "Markdown", "Preferences", "RecipesBase", "RecursiveArrayTools", "Reexport", "RuntimeGeneratedFunctions", "SciMLOperators", "SnoopPrecompile", "StaticArraysCore", "Statistics", "SymbolicIndexingInterface", "Tables", "TruncatedStacktraces"]
-git-tree-sha1 = "4848a0542bfa419b44b57d7e016cd82479a8a27c"
-uuid = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
-version = "1.91.0"
-
-[[deps.SciMLOperators]]
-deps = ["ArrayInterface", "DocStringExtensions", "Lazy", "LinearAlgebra", "Setfield", "SparseArrays", "StaticArraysCore", "Tricks"]
-git-tree-sha1 = "e61e48ef909375203092a6e83508c8416df55a83"
-uuid = "c0aeaf25-5076-4817-a8d5-81caf7dfa961"
-version = "0.2.0"
 
 [[deps.Scratch]]
 deps = ["Dates"]
@@ -1261,12 +760,6 @@ version = "1.3.18"
 
 [[deps.Serialization]]
 uuid = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
-
-[[deps.Setfield]]
-deps = ["ConstructionBase", "Future", "MacroTools", "StaticArraysCore"]
-git-tree-sha1 = "e2cc6d8c88613c05e1defb55170bf5ff211fbeac"
-uuid = "efcf1570-3423-57d1-acb7-fd33fddbac46"
-version = "1.1.1"
 
 [[deps.Showoff]]
 deps = ["Dates", "Grisu"]
@@ -1331,38 +824,10 @@ git-tree-sha1 = "d1bf48bfcc554a3761a133fe3a9bb01488e06916"
 uuid = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 version = "0.33.21"
 
-[[deps.StatsFuns]]
-deps = ["ChainRulesCore", "HypergeometricFunctions", "InverseFunctions", "IrrationalConstants", "LogExpFunctions", "Reexport", "Rmath", "SpecialFunctions"]
-git-tree-sha1 = "f625d686d5a88bcd2b15cd81f18f98186fdc0c9a"
-uuid = "4c63d2b9-4356-54db-8cca-17b64c39e42c"
-version = "1.3.0"
-
 [[deps.StringManipulation]]
 git-tree-sha1 = "46da2434b41f41ac3594ee9816ce5541c6096123"
 uuid = "892a3eda-7b42-436c-8928-eab12a02cf0e"
 version = "0.3.0"
-
-[[deps.SuiteSparse]]
-deps = ["Libdl", "LinearAlgebra", "Serialization", "SparseArrays"]
-uuid = "4607b0f0-06f3-5cda-b6b1-a6196a1729e9"
-
-[[deps.SymbolicIndexingInterface]]
-deps = ["DocStringExtensions"]
-git-tree-sha1 = "f8ab052bfcbdb9b48fad2c80c873aa0d0344dfe5"
-uuid = "2efcf032-c050-4f8e-a9bb-153293bab1f5"
-version = "0.2.2"
-
-[[deps.SymbolicUtils]]
-deps = ["AbstractTrees", "Bijections", "ChainRulesCore", "Combinatorics", "ConstructionBase", "DataStructures", "DocStringExtensions", "DynamicPolynomials", "IfElse", "LabelledArrays", "LinearAlgebra", "MultivariatePolynomials", "NaNMath", "Setfield", "SparseArrays", "SpecialFunctions", "StaticArrays", "TimerOutputs", "Unityper"]
-git-tree-sha1 = "ca0dbe8434ace322cea02fc8cce0dea8d5308e87"
-uuid = "d1185830-fcd6-423d-90d6-eec64667417b"
-version = "1.0.3"
-
-[[deps.Symbolics]]
-deps = ["ArrayInterface", "ConstructionBase", "DataStructures", "DiffRules", "Distributions", "DocStringExtensions", "DomainSets", "Groebner", "IfElse", "LaTeXStrings", "LambertW", "Latexify", "Libdl", "LinearAlgebra", "MacroTools", "Markdown", "NaNMath", "RecipesBase", "Reexport", "Requires", "RuntimeGeneratedFunctions", "SciMLBase", "Setfield", "SparseArrays", "SpecialFunctions", "StaticArrays", "SymbolicUtils", "TreeViews"]
-git-tree-sha1 = "fce1fd0b13f860128c8b8aab0bab475eeeeb7994"
-uuid = "0c5d862f-8b57-4792-8d23-62f2024744c7"
-version = "5.1.0"
 
 [[deps.TOML]]
 deps = ["Dates"]
@@ -1396,34 +861,11 @@ version = "0.1.1"
 deps = ["InteractiveUtils", "Logging", "Random", "Serialization"]
 uuid = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
-[[deps.TimerOutputs]]
-deps = ["ExprTools", "Printf"]
-git-tree-sha1 = "f2fd3f288dfc6f507b0c3a2eb3bac009251e548b"
-uuid = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
-version = "0.5.22"
-
 [[deps.TranscodingStreams]]
 deps = ["Random", "Test"]
 git-tree-sha1 = "94f38103c984f89cf77c402f2a68dbd870f8165f"
 uuid = "3bb67fe8-82b1-5028-8e26-92a6c54297fa"
 version = "0.9.11"
-
-[[deps.TreeViews]]
-deps = ["Test"]
-git-tree-sha1 = "8d0d7a3fe2f30d6a7f833a5f19f7c7a5b396eae6"
-uuid = "a2a6695c-b41b-5b7d-aed9-dbfdeacea5d7"
-version = "0.3.0"
-
-[[deps.Tricks]]
-git-tree-sha1 = "6bac775f2d42a611cdfcd1fb217ee719630c4175"
-uuid = "410a4b4d-49e4-4fbc-ab6d-cb71b17b3775"
-version = "0.1.6"
-
-[[deps.TruncatedStacktraces]]
-deps = ["InteractiveUtils", "MacroTools"]
-git-tree-sha1 = "f7057ba94e63b269125c0db75dcdef913d956351"
-uuid = "781d530d-4396-4725-bb49-402e4bee1e77"
-version = "1.1.0"
 
 [[deps.URIs]]
 git-tree-sha1 = "074f993b0ca030848b897beff716d93aca60f06a"
@@ -1442,12 +884,6 @@ deps = ["REPL"]
 git-tree-sha1 = "53915e50200959667e78a92a418594b428dffddf"
 uuid = "1cfade01-22cf-5700-b092-accc4b62d6e1"
 version = "0.4.1"
-
-[[deps.Unityper]]
-deps = ["ConstructionBase"]
-git-tree-sha1 = "d5f4ec8c22db63bd3ccb239f640e895cfde145aa"
-uuid = "a7c27f48-0311-42f6-a7f8-2c11e75eb415"
-version = "0.1.2"
 
 [[deps.Unzip]]
 git-tree-sha1 = "ca0969166a028236229f63514992fc073799bb78"
@@ -1626,12 +1062,6 @@ git-tree-sha1 = "c6edfe154ad7b313c01aceca188c05c835c67360"
 uuid = "3161d3a3-bdf6-5164-811a-617609db77b4"
 version = "1.5.4+0"
 
-[[deps.ZygoteRules]]
-deps = ["MacroTools"]
-git-tree-sha1 = "8c1a8e4dfacb1fd631745552c8db35d0deb09ea0"
-uuid = "700de1a5-db45-46bc-99cf-38207098b444"
-version = "0.2.2"
-
 [[deps.fzf_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "868e669ccb12ba16eaf50cb2957ee2ff61261c56"
@@ -1703,36 +1133,13 @@ version = "1.4.1+0"
 """
 
 # ╔═╡ Cell order:
-# ╠═25eeeab2-ca14-4793-a413-18a84be40a83
-# ╟─dee4d1fa-bb8a-11ed-1bc1-fff3f486280d
+# ╟─25eeeab2-ca14-4793-a413-18a84be40a83
+# ╟─79554459-0064-4806-808e-bdebf5a2cce2
 # ╠═bd12a7a7-709b-46c4-b364-76e58224c032
-# ╟─a2bca4bc-b9c3-47f4-bef5-8c6b5e52eb41
-# ╠═d09c9c28-e5dc-43f2-be1c-5c7be58c5bff
-# ╠═480a41a6-8533-4092-8f30-ebc111f949c6
-# ╟─666c6045-1984-4988-a2fa-e153fbac05c8
-# ╟─1415aaef-0709-4bdd-9175-f6e2939acbb6
-# ╠═f0cc0ab4-ea55-412b-abf2-0eb06f275fe6
-# ╟─709e4458-275e-4fd8-8a3d-3de8cebf9110
-# ╠═38d13e33-1241-488a-8a98-019a24895bd8
-# ╟─a2c2c14a-5221-4cab-b9b4-9347b57fa284
-# ╠═4b744b76-bd4c-403a-b7c9-6a4f462cc17d
-# ╟─57898f21-a006-4f57-b5de-d79f333c79ea
-# ╠═1fcb3e87-e0e7-4211-809d-fa041194d7e0
-# ╠═08c6d36c-1aeb-4464-a422-6c2e351b3e45
-# ╟─c6aaddec-195b-45c9-961c-c6d2dba1d7f0
-# ╠═ba4c1fd0-ccc8-4e80-b791-697c099560b1
-# ╠═1eaa45d0-6062-48c1-a12b-e49d448e31c8
-# ╟─da333b96-ee17-42f0-b260-7e3fabb4aa58
-# ╠═f1780048-3c9d-43b6-b47f-ef157b3781fc
-# ╟─89dc0559-3e82-4307-8958-4d126941479f
-# ╠═01f106ab-47f8-4175-972d-cba05add7833
-# ╠═a68e2348-2d4e-4513-ade0-a18e328e2a3e
-# ╠═d159b9ad-f11d-4665-ade1-6cf95d52e607
-# ╠═d043e7fd-fb9e-465d-89ec-68776e8860eb
-# ╠═31ee84a2-619e-4983-a6ca-11fa0bcaa795
-# ╠═355219bc-89bc-4312-8360-0a3c131f4748
-# ╠═26a7d6c3-3713-4047-83f5-3b0b0d4d4b6d
-# ╠═e1188e8a-038d-43ed-9a1f-0f5e5b1c021b
-# ╠═48354253-d4f8-4d0a-a292-f1f540af2afb
+# ╟─d09c9c28-e5dc-43f2-be1c-5c7be58c5bff
+# ╟─480a41a6-8533-4092-8f30-ebc111f949c6
+# ╟─958781d6-a2e3-41b7-a660-58b49607bb71
+# ╟─38d13e33-1241-488a-8a98-019a24895bd8
+# ╟─993984e9-66a0-4c21-96a3-b2cf81665eec
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002

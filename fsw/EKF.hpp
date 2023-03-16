@@ -16,6 +16,18 @@ public:
     const Eigen::Vector4f&
     getState() const;
 
+    /**
+     * Debug Fields
+     */
+    const Eigen::Vector3f&
+    getMeasurement() const { return m_z; }
+
+    const Eigen::Vector3f&
+    getError() const { return m_error; }
+
+    const Eigen::Vector3f&
+    getModeledGravity() const { return m_modeled_gravity; }
+
 private:
     void predict(const Eigen::Vector3f& gyro, float delta_t);
     void measurement();
@@ -36,5 +48,7 @@ private:
     Eigen::Matrix4f m_att_q_pred_cov;
     Eigen::Vector3f m_modeled_gravity;
     Eigen::Matrix<float, 3, 4> m_H;
+    Eigen::Vector3f m_z;
+    Eigen::Vector3f m_error;
 };
 

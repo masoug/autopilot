@@ -12,34 +12,24 @@ void predict_jacobian(
 )
 {
     du(0, 0) = 1;
-    du(0, 1) = 0.5 * RHS2 * RHS1[0];
-    du(0, 2) = 0.5 * RHS2 * RHS1[1];
-    du(0, 3) = 0.5 * RHS2 * RHS1[2];
+    du(1, 0) = 0.5 * RHS2 * RHS1[0];
+    du(2, 0) = 0.5 * RHS2 * RHS1[1];
+    du(3, 0) = 0.5 * RHS2 * RHS1[2];
 
-    du(1, 0) = -0.5 * RHS2 * RHS1[0];
+    du(0, 1) = -0.5 * RHS2 * RHS1[0];
     du(1, 1) = 1;
-    du(1, 2) = -0.5 * RHS2 * RHS1[2];
-    du(1, 3) = 0.5 * RHS2 * RHS1[1];
+    du(2, 1) = -0.5 * RHS2 * RHS1[2];
+    du(3, 1) = 0.5 * RHS2 * RHS1[1];
 
-    du(2, 0) = -0.5 * RHS2 * RHS1[1];
-    du(2, 1) = 0.5 * RHS2 * RHS1[2];
+    du(0, 2) = -0.5 * RHS2 * RHS1[1];
+    du(1, 2) = 0.5 * RHS2 * RHS1[2];
     du(2, 2) = 1;
-    du(2, 3) = -0.5 * RHS2 * RHS1[0];
+    du(3, 2) = -0.5 * RHS2 * RHS1[0];
 
-    du(3, 0) = -0.5 * RHS2 * RHS1[2];
-    du(3, 1) = -0.5 * RHS2 * RHS1[1];
-    du(3, 2) = 0.5 * RHS2 * RHS1[0];
+    du(0, 3) = -0.5 * RHS2 * RHS1[2];
+    du(1, 3) = -0.5 * RHS2 * RHS1[1];
+    du(2, 3) = 0.5 * RHS2 * RHS1[0];
     du(3, 3) = 1;
-}
-
-inline float pow(const float& base, const int exp)
-{
-    float result = 1.0;
-    for (int i = 0; i < exp; i++)
-    {
-        result *= base;
-    }
-    return result;
 }
 
 void quat2mat(
@@ -47,17 +37,17 @@ void quat2mat(
         const Eigen::Vector4f& RHS1  // quaternion `q`
 )
 {
-    du(0, 0) = 1.0 + -2.0 * (pow(RHS1[2], 2) + pow(RHS1[3], 2));
-    du(0, 1) = 2.0 * (RHS1[0] * RHS1[3] + RHS1[1] * RHS1[2]);
-    du(0, 2) = 2.0 * (RHS1[1] * RHS1[3] + -1 * RHS1[0] * RHS1[2]);
+    const auto& qr = RHS1[0];
+    const auto& qi = RHS1[1];
+    const auto& qj = RHS1[2];
+    const auto& qk = RHS1[3];
+    const auto qi2 = qi*qi;
+    const auto qj2 = qj*qj;
+    const auto qk2 = qk*qk;
 
-    du(1, 0) = 2.0 * (RHS1[1] * RHS1[2] + -1 * RHS1[0] * RHS1[3]);
-    du(1, 1) = 1.0 + -2.0 * (pow(RHS1[1], 2) + pow(RHS1[3], 2));
-    du(1, 2) = 2.0 * (RHS1[0] * RHS1[1] + RHS1[2] * RHS1[3]);
-
-    du(2, 0) = 2.0 * (RHS1[0] * RHS1[2] + RHS1[1] * RHS1[3]);
-    du(2, 1) = 2.0 * (RHS1[2] * RHS1[3] + -1 * RHS1[0] * RHS1[1]);
-    du(2, 2) = 1.0 + -2.0 * (pow(RHS1[1], 2) + pow(RHS1[2], 2));
+    du << 1.0-2.0*(qj2+qk2),          2.0*(qi*qj-qk*qr),     2.0*(qi*qk+qj*qr),
+              2.0*(qi*qj+qk*qr),  1.0-2.0*(qi2+qk2),         2.0*(qj*qk-qi*qr),
+              2.0*(qi*qk-qj*qr),      2.0*(qj*qk+qi*qr), 1.0-2.0*(qi2+qj2);
 }
 
 void measurement_jacobian(
@@ -67,18 +57,19 @@ void measurement_jacobian(
 )
 {
     du(0, 0) = -2.0 * RHS2[2] * RHS1[2] + 2.0 * RHS2[1] * RHS1[3];
-    du(0, 1) = -2.0 * RHS2[0] * RHS1[3] + 2.0 * RHS2[2] * RHS1[1];
-    du(0, 2) = -2.0 * RHS2[1] * RHS1[1] + 2.0 * RHS2[0] * RHS1[2];
-    du(0, 3) = 2.0 * RHS2[1] * RHS1[2] + 2.0 * RHS2[2] * RHS1[3];
+    du(1, 0) = -2.0 * RHS2[0] * RHS1[3] + 2.0 * RHS2[2] * RHS1[1];
+    du(2, 0) = -2.0 * RHS2[1] * RHS1[1] + 2.0 * RHS2[0] * RHS1[2];
 
-    du(1, 0) = -4.0 * RHS2[1] * RHS1[1] + 2.0 * RHS2[2] * RHS1[0] + 2.0 * RHS2[0] * RHS1[2];
-    du(1, 1) = 2.0 * RHS2[0] * RHS1[3] + -2.0 * RHS2[1] * RHS1[0] + -4.0 * RHS2[2] * RHS1[1];
-    du(1, 2) = 2.0 * RHS2[1] * RHS1[1] + -2.0 * RHS2[2] * RHS1[0] + -4.0 * RHS2[0] * RHS1[2];
-    du(1, 3) = 2.0 * RHS2[0] * RHS1[1] + 2.0 * RHS2[2] * RHS1[3];
+    du(0, 1) = 2.0 * RHS2[1] * RHS1[2] + 2.0 * RHS2[2] * RHS1[3];
+    du(1, 1) = -4.0 * RHS2[1] * RHS1[1] + 2.0 * RHS2[2] * RHS1[0] + 2.0 * RHS2[0] * RHS1[2];
+    du(2, 1) = 2.0 * RHS2[0] * RHS1[3] + -2.0 * RHS2[1] * RHS1[0] + -4.0 * RHS2[2] * RHS1[1];
 
-    du(2, 0) = 2.0 * RHS2[0] * RHS1[0] + -4.0 * RHS2[2] * RHS1[2] + 2.0 * RHS2[1] * RHS1[3];
-    du(2, 1) = -4.0 * RHS2[0] * RHS1[3] + 2.0 * RHS2[1] * RHS1[0] + 2.0 * RHS2[2] * RHS1[1];
-    du(2, 2) = -2.0 * RHS2[0] * RHS1[0] + 2.0 * RHS2[2] * RHS1[2] + -4.0 * RHS2[1] * RHS1[3];
+    du(0, 2) = 2.0 * RHS2[1] * RHS1[1] + -2.0 * RHS2[2] * RHS1[0] + -4.0 * RHS2[0] * RHS1[2];
+    du(1, 2) = 2.0 * RHS2[0] * RHS1[1] + 2.0 * RHS2[2] * RHS1[3];
+    du(2, 2) = 2.0 * RHS2[0] * RHS1[0] + -4.0 * RHS2[2] * RHS1[2] + 2.0 * RHS2[1] * RHS1[3];
+
+    du(0, 3) = -4.0 * RHS2[0] * RHS1[3] + 2.0 * RHS2[1] * RHS1[0] + 2.0 * RHS2[2] * RHS1[1];
+    du(1, 3) = -2.0 * RHS2[0] * RHS1[0] + 2.0 * RHS2[2] * RHS1[2] + -4.0 * RHS2[1] * RHS1[3];
     du(2, 3) = 2.0 * RHS2[0] * RHS1[1] + 2.0 * RHS2[1] * RHS1[2];
 }
 
@@ -155,11 +146,13 @@ EKF::step(const Eigen::Vector3f& gyro,
     // update modeled gravity
     measurement();
 
+    // TODO: Ignore gravity if magnitude is not close to 9.81!!
+
     // Normalize gravity vector since we only care about direction
-    const Eigen::Vector3f z = acc.normalized();
+    m_z = acc.normalized();
 
     // observation error
-    const Eigen::Vector3f error = z - m_modeled_gravity;
+    m_error = m_z - m_modeled_gravity;
 
     // observation noise
     const Eigen::Matrix3f R = m_acc_noise*Eigen::Matrix3f::Identity();
@@ -169,7 +162,7 @@ EKF::step(const Eigen::Vector3f& gyro,
     const Eigen::Matrix<float, 4, 3> K = m_att_q_pred_cov*m_H.transpose()*S.inverse();
 
     // apply corrections
-    m_att_q = (m_att_q_pred + K*error).normalized();
+    m_att_q = (m_att_q_pred + K*m_error).normalized();
 
     // update covariance
     m_att_cov = (Eigen::Matrix4f::Identity()-K*m_H)*m_att_q_pred_cov;
