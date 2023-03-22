@@ -6,7 +6,8 @@
 class EKF
 {
 public:
-    explicit EKF(float gyro_noise=0.3, float acc_noise=3.0);
+    explicit EKF(float gyro_noise=0.4,
+                 float acc_noise=1.0);
 
     void
     step(const Eigen::Vector3f& gyro,

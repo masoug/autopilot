@@ -12,6 +12,7 @@ begin
 	using LinearAlgebra
 	using Plots
 	using Rotations
+	using Statistics
 end
 
 # ╔═╡ 01f106ab-47f8-4175-972d-cba05add7833
@@ -27,7 +28,8 @@ In this notebook we'll build a simple EKF to estimate the 3D orientation of our 
 
 # ╔═╡ bd12a7a7-709b-46c4-b364-76e58224c032
 begin
-	imu_data = Matrix(CSV.read("imu-dataset/axial.csv", DataFrame, header=false))
+	imu_data = Matrix(CSV.read("imu-dataset/datalog.csv", DataFrame, header=false))
+	imu_data = imu_data[1:5442, :]
 	imu_data[:, 1] .-= imu_data[1, 1]
 	imu_data
 end
@@ -61,12 +63,42 @@ This dataset is a simple test of rotating +-90 degrees back-and-forth along each
 We also note here that the gravity vector is measured by the imu normal to the earth's surface. This convention will be helpful for us to correct pitch and roll estimates (but not yaw, because that is unobserved by the gravity vector).
 """
 
+# ╔═╡ a9a50fb8-98fc-4a9f-9acd-68fb73e28b59
+md"""
+### Debias Gyro
+We'll use the first couple seconds of the dataframe to estimate gyro bias, and cancel that out.
+"""
+
+# ╔═╡ 3f569091-78a5-4ffb-835b-24e18a26f106
+plot(imu_data[1:1000, 2:4])
+
+# ╔═╡ ecd3a26c-7438-4aa0-80a8-6ddac6869053
+gyro_bias = mean.(eachcol(imu_data[1:1000, 2:4]))
+
+# ╔═╡ 2e5f5677-71cf-4185-9df5-7f3ac5928b9f
+imu_data[:, 2:4] = imu_data[:, 2:4] .- gyro_bias'
+
+# ╔═╡ 7d8bed0e-903e-4c4e-9167-414ee4b3f652
+md"""
+### Calibrate Accelerometer
+Estimate gravity measurement from stationary gyrocompass.
+"""
+
+# ╔═╡ 1ae0e920-f858-48b5-8a9c-501e6474e989
+plot(imu_data[1:1000, 5:7])
+
+# ╔═╡ 4d4efd6c-b3cc-4b03-9c4a-259fb63581e9
+acc_cal = mean.(eachcol(imu_data[1:1000, 5:7]))
+
+# ╔═╡ f3f2cb1a-125c-450a-a424-f88c183e2367
+calibrated_gravity_magnitude = norm(acc_cal)
+
+# ╔═╡ 3003ec21-8327-4a03-a12b-925783100e40
+plot(norm.(eachrow(imu_data[:, 5:7])))
+
 # ╔═╡ 1415aaef-0709-4bdd-9175-f6e2939acbb6
 md"""
 ### Prediction plus Correction
-Every Kalman Filter in the world follows two rules: First _predict_ the next state given some underlying dynamics model. Then _correct_ that prediction with some unbiased measurement. For our case, we can use the gyroscope measurements to _predict_ our attitude by integrating the angular rates. We can then use the accelerometer's gravity measurement to _correct_ our predictions.
-
-This leverages the best of both worlds because the gyro predictions will drift over time due to integration errors, which the accelerometer will correct with it's unbiased gravity measurements. On the other hand, the accelerometer's noisy gravity measurements can be filtered out by the smoothing effects when integrating angular rates from the gyro.
 """
 
 # ╔═╡ f0cc0ab4-ea55-412b-abf2-0eb06f275fe6
@@ -129,15 +161,6 @@ function prediction_noise(prev_noise, q, σ, ω, Δt)
 	return F*prev_noise*F' + Q
 end
 
-# ╔═╡ 57898f21-a006-4f57-b5de-d79f333c79ea
-md"""
-Details behind this formula derivation can be found at the same place where the prediction model was derived: [https://ahrs.readthedocs.io/en/latest/filters/ekf.html#prediction-step](https://ahrs.readthedocs.io/en/latest/filters/ekf.html#prediction-step)
-
-For now, we'll move onto the correction step: Recall the correction step of a Kalman Filter applies a scaled error to shift the estimate towards the measured state. The amount of shifting is the Kalman gain, which is a function of the prediction and measurement noises. This weights the measurement versus the prediction depending on whichever is more certain.
-
-Thus we need a measurement model, i.e. a mapping from a predicted state to what the sensor produces. Here our accelerometer produces a 3D vector descrbing where the gravity vector is pointing, so our measurement model must compute where the gravity vector should point given the current smoothed attitude.
-"""
-
 # ╔═╡ 1fcb3e87-e0e7-4211-809d-fa041194d7e0
 function quat2mat(q)
 	qᵣ = q[1]
@@ -168,8 +191,14 @@ measurement_model_jac(q) = ForwardDiff.jacobian(measurement_model, q)
 
 # ╔═╡ 1eaa45d0-6062-48c1-a12b-e49d448e31c8
 function correction(q_predicted, q_noise, observed_g, observation_noise)
+	# check if we're undergoing major linear acceleration
+	acc_norm = norm(observed_g)
+	if abs(acc_norm - calibrated_gravity_magnitude) > 0.1
+		return q_predicted, q_noise
+	end
+	
 	# normalize the observed gravity vector since we don't care about magnitude
-	z = observed_g/norm(observed_g)
+	z = observed_g/acc_norm
 
 	# compute observation error w.r.t. predicted state
 	error = z - measurement_model(q_predicted)
@@ -194,11 +223,6 @@ function correction(q_predicted, q_noise, observed_g, observation_noise)
 	return normalized_q, P
 end
 
-# ╔═╡ da333b96-ee17-42f0-b260-7e3fabb4aa58
-md"""
-Now we can re-run the same experiment for `predict()`, except this time we'll apply `correction()`s from the accelerometer:
-"""
-
 # ╔═╡ f1780048-3c9d-43b6-b47f-ef157b3781fc
 begin
 	# Initial state is identity quaternion
@@ -210,15 +234,19 @@ begin
 	# noise parameters
 	# tune these numbers against a dataset to get the best state estimates
 	gyro_noise = 0.3
-	accel_noise = 3
+	accel_noise = 0.8
 	
 	local trajectory = zeros(size(imu_data, 1), 5)
+	local prev_ts = imu_data[1, 1] - 0.01
 	for i = 1:size(imu_data, 1)
 		ω = imu_data[i, 2:4]
+		ts = imu_data[i, 1]
+		Δt = ts - prev_ts
+		prev_ts = ts
 
 		# predict!
-		q_pred = predict(q, ω, 0.01)
-		pred_noise = prediction_noise(prev_noise, q, gyro_noise, ω, 0.01)
+		q_pred = predict(q, ω, Δt)
+		pred_noise = prediction_noise(prev_noise, q, gyro_noise, ω, Δt)
 
 		# correct!
 		obs_g = imu_data[i, 5:7]
@@ -235,14 +263,18 @@ begin
 	angles = plot(trajectory[:, 1], trajectory[:, 2:4],
 		          label=["x" "y" "z"],
 		          ylabel="Angle (deg)")
-	cov = plot(trajectory[:, 1], trajectory[:, 5],
-		       label="Covariance Trace")
-	plot(angles, cov, layout=(2, 1))
+	accel_plot = plot(imu_data[:, 1], imu_data[:, 5:7],
+				      label=["accel.x" "accel.y" "accel.z"],
+				 	  title="Accelerometer Readings",
+				 	  xlabel="Time (sec)", ylabel="Acceleration (m/s/s)")
+	# cov = plot(trajectory[:, 1], trajectory[:, 5],
+	# 	       label="Covariance Trace")
+	plot(angles, accel_plot, layout=(2, 1))
 end
 
 # ╔═╡ 89dc0559-3e82-4307-8958-4d126941479f
 md"""
-Awesome! Our roll-pitch-yaw graph looks very similar to the one before with the added benefit from the gravity measurements keeping the roll and pitch axes converged. It takes a little bit of finagling with the noise parameters to get good filter performance because the sensors are rarely exactly characterized in pure Gaussian models. So instead of calibrating sensors to extreme precision, we can simply tune the filter noise parameters such that the resulting state estimates match ground-truth as best we can. 
+## Codegen
 """
 
 # ╔═╡ a68e2348-2d4e-4513-ade0-a18e328e2a3e
@@ -298,6 +330,7 @@ ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 Rotations = "6038ab10-8711-5258-84ad-4b1120ba62dc"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
 
 [compat]
@@ -315,7 +348,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.8.3"
 manifest_format = "2.0"
-project_hash = "256d498f3fc0c3c0e2679a343726cfb13c541309"
+project_hash = "7b0400c8be2b97f361762315648bfe51f8ec6df9"
 
 [[deps.AbstractAlgebra]]
 deps = ["GroupsCore", "InteractiveUtils", "LinearAlgebra", "MacroTools", "Markdown", "Random", "RandomExtensions", "SparseArrays", "Test"]
@@ -1710,19 +1743,26 @@ version = "1.4.1+0"
 # ╠═d09c9c28-e5dc-43f2-be1c-5c7be58c5bff
 # ╠═480a41a6-8533-4092-8f30-ebc111f949c6
 # ╟─666c6045-1984-4988-a2fa-e153fbac05c8
+# ╟─a9a50fb8-98fc-4a9f-9acd-68fb73e28b59
+# ╠═3f569091-78a5-4ffb-835b-24e18a26f106
+# ╠═ecd3a26c-7438-4aa0-80a8-6ddac6869053
+# ╠═2e5f5677-71cf-4185-9df5-7f3ac5928b9f
+# ╟─7d8bed0e-903e-4c4e-9167-414ee4b3f652
+# ╠═1ae0e920-f858-48b5-8a9c-501e6474e989
+# ╠═4d4efd6c-b3cc-4b03-9c4a-259fb63581e9
+# ╠═f3f2cb1a-125c-450a-a424-f88c183e2367
+# ╠═3003ec21-8327-4a03-a12b-925783100e40
 # ╟─1415aaef-0709-4bdd-9175-f6e2939acbb6
 # ╠═f0cc0ab4-ea55-412b-abf2-0eb06f275fe6
 # ╟─709e4458-275e-4fd8-8a3d-3de8cebf9110
 # ╠═38d13e33-1241-488a-8a98-019a24895bd8
 # ╟─a2c2c14a-5221-4cab-b9b4-9347b57fa284
 # ╠═4b744b76-bd4c-403a-b7c9-6a4f462cc17d
-# ╟─57898f21-a006-4f57-b5de-d79f333c79ea
 # ╠═1fcb3e87-e0e7-4211-809d-fa041194d7e0
 # ╠═08c6d36c-1aeb-4464-a422-6c2e351b3e45
 # ╟─c6aaddec-195b-45c9-961c-c6d2dba1d7f0
 # ╠═ba4c1fd0-ccc8-4e80-b791-697c099560b1
 # ╠═1eaa45d0-6062-48c1-a12b-e49d448e31c8
-# ╟─da333b96-ee17-42f0-b260-7e3fabb4aa58
 # ╠═f1780048-3c9d-43b6-b47f-ef157b3781fc
 # ╟─89dc0559-3e82-4307-8958-4d126941479f
 # ╠═01f106ab-47f8-4175-972d-cba05add7833

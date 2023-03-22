@@ -8,6 +8,7 @@
 
 #include "pico/stdlib.h"
 
+#include "Datalogger.hpp"
 #include "EKF.hpp"
 #include "IMU.hpp"
 #include "LoopRate.hpp"
@@ -20,34 +21,42 @@ int main()
     const uint LED_PIN = PICO_DEFAULT_LED_PIN;
     gpio_init(LED_PIN);
     gpio_set_dir(LED_PIN, GPIO_OUT);
+    bool led_state = true;
+    gpio_put(LED_PIN, led_state);
+
+    // give some time for the peripherals to warm up
+    sleep_ms(3000);
 
     // navigation subsystems
     IMU imu;
     EKF ekf;
 
+    // logging & debugging systems
+    Datalogger dlog;
+    auto& cycle_slack = dlog.cycleSlack();
+    auto& gyro = dlog.gyro();
+    auto& acc = dlog.acc();
+    auto& nav = dlog.nav();
+
     LoopRate rate(10);
-    int64_t cycle_slack = 0;
-    bool led_state = false;
     uint8_t cycle_counter = 0;
+    float prev_ts = 0.0;
     while (true)
     {
         const float ts = to_us_since_boot(get_absolute_time()) * 1e-6f;
+        const float delta_t = ts - prev_ts;
+        prev_ts = ts;
 
         // Read sensor data
         const auto imu_read_status = imu.read();
-        if (imu_read_status != 14)
-        {
-            break;
-        }
 
         // Update navigation algorithms
-        const auto& gyro = imu.getGyro();
-        const auto& acc = imu.getAcc();
-        ekf.step(gyro, acc, 0.01);
-
-        const auto& nav = ekf.getState();
-        const auto& ekf_meas = ekf.getMeasurement();
-        const auto& ekf_grav = ekf.getModeledGravity();
+        gyro = (imu_read_status == 14) ? imu.getGyro() : Eigen::Vector3f::Zero();
+        acc = (imu_read_status == 14) ? imu.getAcc() : Eigen::Vector3f::Zero();
+        if (delta_t > 0.005) {
+            ekf.step(gyro, acc, delta_t);
+            nav = ekf.getState();
+        }
 
         // TODO Guidance
         // TODO Control
@@ -60,12 +69,9 @@ int main()
         }
 
         // Output telemetry
-        printf("%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%d\n",
-               ts,
-               gyro[0], gyro[1], gyro[2],
-               acc[0], acc[1], acc[2],
-               nav[0], nav[1], nav[2], nav[3],
-               cycle_slack);
+        if (ts > 3.5) {
+            dlog.write(ts);
+        }
 
         cycle_slack = rate.wait();
         cycle_counter++;

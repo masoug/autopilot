@@ -19,16 +19,17 @@ md"""
 
 # ╔═╡ bd12a7a7-709b-46c4-b364-76e58224c032
 begin
-	imu_data = Matrix(CSV.read("imu-dataset/axial-hil.csv", DataFrame, header=false))
+	imu_data = Matrix(CSV.read("imu-dataset/datalog.csv", DataFrame, header=false))
+	imu_data = imu_data[1:5442, :]
 	imu_data
 end
 
 # ╔═╡ d09c9c28-e5dc-43f2-be1c-5c7be58c5bff
 function plot_raw_imu(imu_data)
-	gyro_plot = plot(imu_data[:, 1], imu_data[:, 2:4],
+	gyro_plot = plot(imu_data[:, 1], 57.2958*imu_data[:, 2:4],
 					 label=["gyro.x" "gyro.y" "gyro.z"],
 					 title="Gyroscope Angular Rates",
-					 xlabel="Time (sec)", ylabel="Rate (rad/s)")
+					 xlabel="Time (sec)", ylabel="Rate (deg/s)")
 	accel_plot = plot(imu_data[:, 1], imu_data[:, 5:7],
 				      label=["accel.x" "accel.y" "accel.z"],
 				 	  title="Accelerometer Readings",

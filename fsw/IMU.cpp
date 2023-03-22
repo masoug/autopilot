@@ -50,13 +50,13 @@ IMU::read()
 
     const float gyro_scale = 17.5f; // range is in milli-dps per bit!
     m_gyro[0] = (float)rawGyroX * gyro_scale * 0.017453293f / 1000.0f;
-    m_gyro[1] = (float)rawGyroY * gyro_scale * 0.017453293f / 1000.0f;
-    m_gyro[2] = (float)rawGyroZ * gyro_scale * 0.017453293f / 1000.0f;
+    m_gyro[1] = -(float)rawGyroY * gyro_scale * 0.017453293f / 1000.0f;
+    m_gyro[2] = -(float)rawGyroZ * gyro_scale * 0.017453293f / 1000.0f;
 
     const float accel_scale = 0.061f; // range is in milli-g per bit!
     m_acc[0] = (float)rawAccX * accel_scale * 9.80665f / 1000.0f;
-    m_acc[1] = (float)rawAccY * accel_scale * 9.80665f / 1000.0f;
-    m_acc[2] = (float)rawAccZ * accel_scale * 9.80665f / 1000.0f;
+    m_acc[1] = -(float)rawAccY * accel_scale * 9.80665f / 1000.0f;
+    m_acc[2] = -(float)rawAccZ * accel_scale * 9.80665f / 1000.0f;
 
     return status;
 }
