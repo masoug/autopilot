@@ -37,26 +37,26 @@ IMU::read()
     }
 
     // process the raw data
-    int16_t rawTemp = buffer[1] << 8 | buffer[0];
-    m_temperature = ((float)rawTemp / 256.0f) + 25.0f;
+    m_raw_temp = buffer[1] << 8 | buffer[0];
+//    m_temperature = ((float)m_raw_temp / 256.0f) + 25.0f;
 
-    int16_t rawGyroX = buffer[3] << 8 | buffer[2];
-    int16_t rawGyroY = buffer[5] << 8 | buffer[4];
-    int16_t rawGyroZ = buffer[7] << 8 | buffer[6];
+    m_raw_gyro[0] = buffer[3] << 8 | buffer[2];
+    m_raw_gyro[1] = buffer[5] << 8 | buffer[4];
+    m_raw_gyro[2] = buffer[7] << 8 | buffer[6];
 
-    int16_t rawAccX = buffer[9] << 8 | buffer[8];
-    int16_t rawAccY = buffer[11] << 8 | buffer[10];
-    int16_t rawAccZ = buffer[13] << 8 | buffer[12];
+    m_raw_acc[0] = buffer[9] << 8 | buffer[8];
+    m_raw_acc[1] = buffer[11] << 8 | buffer[10];
+    m_raw_acc[2] = buffer[13] << 8 | buffer[12];
 
-    const float gyro_scale = 17.5f; // range is in milli-dps per bit!
-    m_gyro[0] = (float)rawGyroX * gyro_scale * 0.017453293f / 1000.0f;
-    m_gyro[1] = -(float)rawGyroY * gyro_scale * 0.017453293f / 1000.0f;
-    m_gyro[2] = -(float)rawGyroZ * gyro_scale * 0.017453293f / 1000.0f;
-
-    const float accel_scale = 0.061f; // range is in milli-g per bit!
-    m_acc[0] = (float)rawAccX * accel_scale * 9.80665f / 1000.0f;
-    m_acc[1] = -(float)rawAccY * accel_scale * 9.80665f / 1000.0f;
-    m_acc[2] = -(float)rawAccZ * accel_scale * 9.80665f / 1000.0f;
+//    const float gyro_scale = 17.5f; // range is in milli-dps per bit!
+//    m_gyro[0] =  (float)m_raw_gyro[0] * gyro_scale * 0.017453293f / 1000.0f;
+//    m_gyro[1] = -(float)m_raw_gyro[1] * gyro_scale * 0.017453293f / 1000.0f;
+//    m_gyro[2] = -(float)m_raw_gyro[2] * gyro_scale * 0.017453293f / 1000.0f;
+//
+//    const float accel_scale = 0.061f; // range is in milli-g per bit!
+//    m_acc[0] =  (float)m_raw_acc[0] * accel_scale * 9.80665f / 1000.0f;
+//    m_acc[1] = -(float)m_raw_acc[1] * accel_scale * 9.80665f / 1000.0f;
+//    m_acc[2] = -(float)m_raw_acc[2] * accel_scale * 9.80665f / 1000.0f;
 
     return status;
 }

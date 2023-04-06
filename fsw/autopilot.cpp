@@ -33,30 +33,25 @@ int main()
 
     // logging & debugging systems
     Datalogger dlog;
-    auto& cycle_slack = dlog.cycleSlack();
-    auto& gyro = dlog.gyro();
-    auto& acc = dlog.acc();
-    auto& nav = dlog.nav();
 
     LoopRate rate(10);
     uint8_t cycle_counter = 0;
     float prev_ts = 0.0;
+    int64_t cycle_slack = 0;
     while (true)
     {
         const float ts = to_us_since_boot(get_absolute_time()) * 1e-6f;
-        const float delta_t = ts - prev_ts;
+        const float delta_t = std::max(0.005f, ts - prev_ts);
         prev_ts = ts;
 
         // Read sensor data
         const auto imu_read_status = imu.read();
 
         // Update navigation algorithms
-        gyro = (imu_read_status == 14) ? imu.getGyro() : Eigen::Vector3f::Zero();
-        acc = (imu_read_status == 14) ? imu.getAcc() : Eigen::Vector3f::Zero();
-        if (delta_t > 0.005) {
-            ekf.step(gyro, acc, delta_t);
-            nav = ekf.getState();
-        }
+        const auto gyro = (imu_read_status == 14) ? imu.getGyro() : Eigen::Vector3f::Zero();
+        const auto acc = (imu_read_status == 14) ? imu.getAcc() : Eigen::Vector3f::Zero();
+        ekf.step(gyro, acc, delta_t);
+        const auto nav = ekf.getState();
 
         // TODO Guidance
         // TODO Control
@@ -69,9 +64,11 @@ int main()
         }
 
         // Output telemetry
-        if (ts > 3.5) {
-            dlog.write(ts);
-        }
+        dlog.write(ts,
+                   imu.getRawAcc(),
+                   imu.getRawGyro(),
+                   nav,
+                   cycle_slack);
 
         cycle_slack = rate.wait();
         cycle_counter++;

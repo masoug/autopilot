@@ -28,7 +28,7 @@ add_compile_options(-Wall
 if (TARGET tinyusb_device)
     add_executable(autopilot
             autopilot.cpp
-            LoopRate.cpp LoopRate.hpp IMU.cpp IMU.hpp EKF.cpp EKF.hpp Datalogger.cpp Datalogger.hpp)
+            LoopRate.cpp LoopRate.hpp IMU.cpp IMU.hpp EKF.cpp EKF.hpp Datalogger.cpp Datalogger.hpp utils.cpp utils.hpp)
 
     # pull in common dependencies
     target_link_libraries(autopilot pico_stdlib hardware_i2c)

@@ -255,7 +255,7 @@ begin
 		q = update[1]
 		prev_noise = update[2]
 
-		trajectory[i, 1] = i*0.01
+		trajectory[i, 1] = ts
 		trajectory[i, 2:4] = 57.2958 * Rotations.params(RotationVec(QuatRotation(q)))
 		trajectory[i, 5] = tr(prev_noise)
 	end

@@ -3,6 +3,9 @@
 #include "pico/stdlib.h"
 #include "hardware/uart.h"
 
+#include "utils.hpp"
+
+
 #define UART_ID uart0
 #define BAUD_RATE 115200
 
@@ -13,8 +16,6 @@
 
 
 Datalogger::Datalogger()
-    : m_throttle(1)
-    , m_countdown(m_throttle)
 {
     // Set up our UART with the required speed.
     uart_init(UART_ID, BAUD_RATE);
@@ -30,18 +31,13 @@ Datalogger::Datalogger()
     memset(m_buffer, 0, FRAME_LEN);
 }
 
-void Datalogger::write(const float timestamp)
+void Datalogger::write(
+        const float timestamp,
+        const std::array<int16_t, 3>& raw_acc,
+        const std::array<int16_t, 3>& raw_gyro,
+        const Eigen::Vector4f& nav_state,
+        const uint16_t& cycle_slack)
 {
-    if (m_countdown > 0)
-    {
-        m_countdown--;
-        return;
-    }
-    else
-    {
-        m_countdown = m_throttle;
-    }
-
 //    snprintf(buffer, FRAME_LEN,
 //             "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%d\n",
 //             timestamp,
@@ -50,30 +46,30 @@ void Datalogger::write(const float timestamp)
 //             m_nav_state[0], m_nav_state[1], m_nav_state[2], m_nav_state[3],
 //             m_cycle_slack);
 
+    // start writing the fields
     size_t offset = 0;
     memcpy(m_buffer + offset, &timestamp, 4);
     offset += 4;
 
-    for (int i = 0; i < 3; i++)
-    {
-        memcpy(m_buffer + offset, &m_raw_gyro[i], 4);
-        offset += 4;
-    }
+    memcpy(m_buffer+offset, raw_gyro.data(), 6);
+    offset += 6;
 
-    for (int i = 0; i < 3; i++)
-    {
-        memcpy(m_buffer + offset, &m_raw_acc[i], 4);
-        offset += 4;
-    }
+    memcpy(m_buffer+offset, raw_acc.data(), 6);
+    offset += 6;
 
     for (int i = 0; i < 4; i++)
     {
-        memcpy(m_buffer + offset, &m_nav_state[i], 4);
+        memcpy(m_buffer + offset, &nav_state[i], 4);
         offset += 4;
     }
 
-    memcpy(m_buffer + offset, &m_cycle_slack, 2);
+    memcpy(m_buffer + offset, &cycle_slack, 2);
     offset += 2;
+
+    // Add a crc-8 checksum at the end
+    const auto checksum = utils::crc8(m_buffer, offset);
+    memcpy(m_buffer + offset, &checksum, 1);
+    offset += 1;
 
     uart_write_blocking(UART_ID, m_buffer, offset);
 }

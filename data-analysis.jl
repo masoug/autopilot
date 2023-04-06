@@ -20,7 +20,6 @@ md"""
 # ╔═╡ bd12a7a7-709b-46c4-b364-76e58224c032
 begin
 	imu_data = Matrix(CSV.read("imu-dataset/datalog.csv", DataFrame, header=false))
-	imu_data = imu_data[1:5442, :]
 	imu_data
 end
 
