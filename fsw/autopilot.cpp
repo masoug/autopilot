@@ -24,9 +24,6 @@ int main()
     bool led_state = true;
     gpio_put(LED_PIN, led_state);
 
-    // give some time for the peripherals to warm up
-    sleep_ms(3000);
-
     // navigation subsystems
     IMU imu;
     EKF ekf;
@@ -34,14 +31,25 @@ int main()
     // logging & debugging systems
     Datalogger dlog;
 
+    // give some time for the peripherals to warm up
+    for (int i = 0; i < 10; i++)
+    {
+        imu.read();
+        sleep_ms(300);
+    }
+
     LoopRate rate(10);
     uint8_t cycle_counter = 0;
-    float prev_ts = 0.0;
+    float prev_ts = -1.0;
     int64_t cycle_slack = 0;
     while (true)
     {
         const float ts = to_us_since_boot(get_absolute_time()) * 1e-6f;
-        const float delta_t = std::max(0.005f, ts - prev_ts);
+        if (prev_ts < 0.0)
+        {
+            prev_ts = ts - 0.01;
+        }
+        const float delta_t = ts - prev_ts;
         prev_ts = ts;
 
         // Read sensor data
@@ -50,7 +58,15 @@ int main()
         // Update navigation algorithms
         const auto gyro = (imu_read_status == 14) ? imu.getGyro() : Eigen::Vector3f::Zero();
         const auto acc = (imu_read_status == 14) ? imu.getAcc() : Eigen::Vector3f::Zero();
-        ekf.step(gyro, acc, delta_t);
+        if (imu_read_status != 14)
+        {
+            // failed to read imu,
+            // TODO propagate ekf
+        }
+        else
+        {
+            ekf.step(gyro, acc, delta_t);
+        }
         const auto nav = ekf.getState();
 
         // TODO Guidance

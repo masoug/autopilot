@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.104/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.104/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.3/jquery.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/flot/4.2.4/jquery.canvaswrapper.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/flot/4.2.4/jquery.colorhelpers.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/flot/4.2.4/jquery.flot.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/flot/4.2.4/jquery.flot.saturated.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/flot/4.2.4/jquery.flot.browser.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/flot/4.2.4/jquery.flot.drawSeries.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/flot/4.2.4/jquery.flot.uiConstants.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/flot/4.2.4/jquery.flot.legend.min.js"></script>
+
+  <title>Ground Station</title>
+
+  <script>
+    if (typeof window.FileReader !== 'function') {
+      alert("The file API isn't supported on this browser yet.");
+    }
+
+    function plotTrajectory(parsed_log)
+    {
+      $('#infileContainer').append(" ("+parsed_log['timestamp'].length+" datapoints)");
+
+      Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIwMDM3MDc3NS1jNWQ0LTQ0YmItYTA4Mi04MGMyOWY3MjYxOTYiLCJpZCI6MTMyNjg3LCJpYXQiOjE2ODA5MDI5MDZ9.eH20C2ZzKMozWAaVtpf2GmcfMyOmC8-jzY-uwytETQg';
+
+      // Initialize the Cesium Viewer in the HTML element with the `cesiumContainer` ID.
+      const viewer = new Cesium.Viewer('cesiumContainer', {
+        infoBox: false,
+        selectionIndicator: false,
+        shouldAnimate: false,
+        animation: false,
+        timeline: false,
+        terrainProvider: Cesium.createWorldTerrain()
+      });
+
+      const position = Cesium.Cartesian3.fromDegrees(
+        -123.0744619,
+        44.0503706,
+        150.0
+      );
+      const heading = Cesium.Math.toRadians(0);
+      const pitch = 0;
+      const roll = 0;
+      const hpr = new Cesium.HeadingPitchRoll(heading, pitch, roll);
+      const orientation = Cesium.Transforms.headingPitchRollQuaternion(
+        position,
+        hpr,
+        Cesium.Ellipsoid.WGS84,
+        Cesium.Transforms.northEastDownToFixedFrame
+      );
+
+      vehicle_entity = null;
+      (async () => {
+        "use strict";
+        try {
+          const avatar_uri = await Cesium.IonResource.fromAssetId(1621388);
+          vehicle_entity = viewer.entities.add({
+            name: 'vehicle',
+            position: position,
+            orientation: orientation,
+            model: {
+              uri: avatar_uri,
+              minimumPixelSize: 128,
+              maximumScale: 20000,
+            },
+          });
+          viewer.trackedEntity = vehicle_entity;
+        } catch (error) {
+          console.log(error);
+        }
+      })();
+
+      // plot data
+      $.plot($("#gyroPlotContainer"), [0, 1, 2].map((j) => parsed_log['timestamp'].map((e, i) => [e, parsed_log['gyro'][i][j]])));
+      $.plot($("#accPlotContainer"), [0, 1, 2].map((j) => parsed_log['timestamp'].map((e, i) => [e, parsed_log['acc'][i][j]])));
+      $.plot($("#cycleSlackPlotContainer"), [parsed_log['timestamp'].map((e, i) => [e, parsed_log['cycle_slack'][i]])]);
+
+      // setup timeline slider
+      $("#timelineSlider").val(0);
+      $("#timelineSlider").on('input change', function() {
+        if (vehicle_entity == null) {
+          return;
+        }
+
+        const index = Math.floor((this.value/1000.0) * parsed_log['timestamp'].length);
+        $("#timestampContainer").text("ts="+parsed_log['timestamp'][index]);
+        const quat = parsed_log["nav"][index];
+        const local_att = Cesium.Quaternion.multiply(orientation, new Cesium.Quaternion(quat[1], quat[2], quat[3], quat[0]), {});
+        const rot_model = Cesium.Quaternion.fromHeadingPitchRoll(new Cesium.HeadingPitchRoll(0, 0, Cesium.Math.toRadians(180)));
+        vehicle_entity.orientation = Cesium.Quaternion.multiply(local_att, rot_model, {});
+
+        // vehicle_entity.position = Cesium.Cartesian3.fromDegrees(-122.410474, 37.745606, 300.0);
+        // console.log(vehicle_entity.position);
+      });
+
+    }
+
+    function setupGroundStation(datalog)
+    {
+      console.log('setup ground station...');
+
+      // load datalog as json
+      let file = datalog.files[0];
+      let reader = new FileReader();
+
+      reader.readAsText(file);
+      reader.onload = function() {
+        $('#infileContainer').text('loaded datafile: '+file.name);
+        plotTrajectory(JSON.parse(reader.result));
+      };
+      reader.onerror = function() {
+        console.error(reader.error);
+      };
+    }
+
+  </script>
+
+  <style>
+    .flex-container {
+      display: flex;
+    }
+  </style>
+
+</head>
+
+<body>
+  <h1>Ground Station</h1>
+  
+  <div id="infileContainer">Select Datafile: <input type="file" onchange="setupGroundStation(this)"></div>
+  <input id="timelineSlider" type="range" min="0" max="1000" value="0" style="width:100%">
+  <span id="timestampContainer"></span>
+
+  <div class="flex-container">
+    <div style="width:40%;height:100%">
+      <h4>Rate Gyro</h4>
+      <div id="gyroPlotContainer" style="width:100%;height:300px"></div>
+
+      <h4>Accelerometer</h4>
+      <div id="accPlotContainer" style="width:100%;height:300px"></div>
+
+      <h4>Cycle Slack</h4>
+      <div id="cycleSlackPlotContainer" style="width:100%;height:300px"></div>
+    </div>
+    <div id="cesiumContainer" style="width:60%;height:100%"></div>
+  </div>
+
+ </div>
+</body>
+</html>

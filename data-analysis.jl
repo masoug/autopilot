@@ -50,23 +50,29 @@ plot(imu_data[:, 1],
 	 title="EKF Attitude Trajectory",
 	 xlabel="Time (sec)", ylabel="Magnitude (deg)")
 
-# ╔═╡ 993984e9-66a0-4c21-96a3-b2cf81665eec
-# ╠═╡ disabled = true
-#=╠═╡
-begin
-	meas = plot(imu_data[:, 1],
-				imu_data[:, 12:14],
-				label=["x" "y" "z"],
-				title="Accelerometer",
-				xlabel="Time (sec)", ylabel="Magnitude")
-	modl = plot(imu_data[:, 1],
-				imu_data[:, 15:17],
-				label=["x" "y" "z"],
-				title="Measurement Model",
-				xlabel="Time (sec)", ylabel="Magnitude")
-	plot(meas, modl, layout=(2,1))
+# ╔═╡ 1b73fd80-de38-4c94-8136-b3b244c1e44c
+function RQ(q)
+	A = QuatRotation(q)
+	x = -atan(-A[3, 2], A[3, 3])
+	Qx = RotX(-x)
+	B = A * Qx;
+	
+	y = -atan(B[3, 1], B[3, 3]);
+	Qy = RotY(-y)
+	C = B * Qy
+	
+	z = -atan(-C[2, 1], C[2, 2]);
+	# Qz = RotZ(-z)
+	# R = C * Qz
+
+	return 57.2958 * [z; y; x]
 end
-  ╠═╡ =#
+
+# ╔═╡ b49fa245-a254-4def-97aa-46f9c690b9d0
+attitude_deg = reduce(vcat, map(RQ, eachrow(imu_data[:, 8:11]))')
+
+# ╔═╡ 458cb75f-73ab-41ad-83e9-c4f2ec9619a1
+plot(attitude_deg, label=["yaw" "pitch" "roll"])
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1133,13 +1139,15 @@ version = "1.4.1+0"
 """
 
 # ╔═╡ Cell order:
-# ╟─25eeeab2-ca14-4793-a413-18a84be40a83
+# ╠═25eeeab2-ca14-4793-a413-18a84be40a83
 # ╟─79554459-0064-4806-808e-bdebf5a2cce2
 # ╠═bd12a7a7-709b-46c4-b364-76e58224c032
 # ╟─d09c9c28-e5dc-43f2-be1c-5c7be58c5bff
 # ╟─480a41a6-8533-4092-8f30-ebc111f949c6
 # ╟─958781d6-a2e3-41b7-a660-58b49607bb71
-# ╟─38d13e33-1241-488a-8a98-019a24895bd8
-# ╟─993984e9-66a0-4c21-96a3-b2cf81665eec
+# ╠═38d13e33-1241-488a-8a98-019a24895bd8
+# ╠═1b73fd80-de38-4c94-8136-b3b244c1e44c
+# ╠═b49fa245-a254-4def-97aa-46f9c690b9d0
+# ╠═458cb75f-73ab-41ad-83e9-c4f2ec9619a1
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002

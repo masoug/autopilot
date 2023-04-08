@@ -41,12 +41,12 @@ IMU::read()
 //    m_temperature = ((float)m_raw_temp / 256.0f) + 25.0f;
 
     m_raw_gyro[0] = buffer[3] << 8 | buffer[2];
-    m_raw_gyro[1] = buffer[5] << 8 | buffer[4];
-    m_raw_gyro[2] = buffer[7] << 8 | buffer[6];
+    m_raw_gyro[1] = -1*(uint16_t)(buffer[5] << 8 | buffer[4]);
+    m_raw_gyro[2] = -1*(uint16_t)(buffer[7] << 8 | buffer[6]);
 
     m_raw_acc[0] = buffer[9] << 8 | buffer[8];
-    m_raw_acc[1] = buffer[11] << 8 | buffer[10];
-    m_raw_acc[2] = buffer[13] << 8 | buffer[12];
+    m_raw_acc[1] = -1*(uint16_t)(buffer[11] << 8 | buffer[10]);
+    m_raw_acc[2] = -1*(uint16_t)(buffer[13] << 8 | buffer[12]);
 
 //    const float gyro_scale = 17.5f; // range is in milli-dps per bit!
 //    m_gyro[0] =  (float)m_raw_gyro[0] * gyro_scale * 0.017453293f / 1000.0f;

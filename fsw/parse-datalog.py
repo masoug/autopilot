@@ -1,3 +1,4 @@
+import json
 import struct
 import sys
 
@@ -44,6 +45,16 @@ def main(args):
 
     buf = fp.read(FRAME_LEN+1)
     checksum_failed = False
+
+    datatable = {
+        'timestamp': [],
+        'gyro': [],
+        'acc': [],
+        'nav': [],
+        'cycle_slack': []
+    }
+
+    prev_ts = None
     while len(buf) == FRAME_LEN+1:
         # does our checksum match?
         checksum = buf[-1]
@@ -62,17 +73,38 @@ def main(args):
         checksum_failed = False
         frame = struct.unpack(FMT_STR, buf[:-1])
 
+        ts = float(frame[0])
+        if prev_ts:
+            if ts < prev_ts:
+                print('possible corrupt frame, skipping')
+                continue
+        prev_ts = ts
+
         # scale & convert sensor data
         scaled_frame = []
-        scaled_frame += [float(frame[0])]                           # timestamp
-        scaled_frame += [GYRO_SCALE*float(f) for f in frame[1:4]]   # raw gyro
-        scaled_frame += [ACC_SCALE*float(f) for f in frame[4:7]]    # raw accel
-        scaled_frame += list(frame[7:11])                           # nav state
-        scaled_frame += [frame[11]]
+        scaled_frame += [ts]                           # timestamp
+        datatable['timestamp'].append(ts)
 
+        scaled_frame += [GYRO_SCALE*float(f) for f in frame[1:4]]   # raw gyro
+        datatable['gyro'].append([GYRO_SCALE*float(f) for f in frame[1:4]])
+
+        scaled_frame += [ACC_SCALE*float(f) for f in frame[4:7]]    # raw accel
+        datatable['acc'].append([ACC_SCALE*float(f) for f in frame[4:7]])
+
+        scaled_frame += list(frame[7:11])                           # nav state
+        datatable['nav'].append(list(frame[7:11]))
+
+        scaled_frame += [frame[11]]
+        datatable['cycle_slack'].append(frame[11])
+
+        # write to csv
         print(','.join(map(str, scaled_frame)), file=out_fp)
         
         buf = fp.read(FRAME_LEN+1)
+
+    print('saving datalog to json...')
+    with open('datalog.json', 'w') as fp:
+        json.dump(datatable, fp)
 
     print('done extracting data')
     fp.close()
