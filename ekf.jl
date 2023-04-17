@@ -21,23 +21,16 @@ using Symbolics
 # ╔═╡ dee4d1fa-bb8a-11ed-1bc1-fff3f486280d
 md"""
 # State Estimation with the Extended Kalman Filter
-The extended kalman filter (EKF) is a very popular method for state estimation. It provides a framework for combining the strengths of multiple different sensors such that the resulting _combined state estimate_ is more accurate compared to reading each sensor individually. This practice of combining multiple sensors readings is commonly known as _sensor fusion_.
 
 In this notebook we'll build a simple EKF to estimate the 3D orientation of our vehicle using an angular rate-gyro and an accelerometer.
 """
 
 # ╔═╡ bd12a7a7-709b-46c4-b364-76e58224c032
 begin
-	imu_data = Matrix(CSV.read("imu-dataset/datalog.csv", DataFrame, header=false))
-	imu_data = imu_data[1:5442, :]
+	imu_data = Matrix(CSV.read("imu-dataset/20230410_8_1.csv", DataFrame, header=false))
 	imu_data[:, 1] .-= imu_data[1, 1]
 	imu_data
 end
-
-# ╔═╡ a2bca4bc-b9c3-47f4-bef5-8c6b5e52eb41
-md"""
-As always--the first rule of robotics is to plot your sensor data first. Get a feel for what kind of information you'll be working with.
-"""
 
 # ╔═╡ d09c9c28-e5dc-43f2-be1c-5c7be58c5bff
 function plot_raw_imu(imu_data)
@@ -56,13 +49,6 @@ end
 # ╔═╡ 480a41a6-8533-4092-8f30-ebc111f949c6
 plot_raw_imu(imu_data)
 
-# ╔═╡ 666c6045-1984-4988-a2fa-e153fbac05c8
-md"""
-This dataset is a simple test of rotating +-90 degrees back-and-forth along each axis (roll, then pitch, then yaw) so it should be pretty straightforward to check if our filter is generating the right output. The IMU is mounted to the vehicle such that $+X$ faces northward, while $+Y$ points eastward, and $+Z$ points downwards ([NED system](https://www.mathworks.com/help/aeroblks/about-aerospace-coordinate-systems.html#f3-23161)), assuming the vehicle is facing the north pole and level on the ground. This system is commonly used for flying vehicles like airplanes and rockets because the axes correspond intuitively to roll (rotate right w.r.t. pilot frame), pitch (tilt upwards), and yaw (spin rightwards) actions.
-
-We also note here that the gravity vector is measured by the imu normal to the earth's surface. This convention will be helpful for us to correct pitch and roll estimates (but not yaw, because that is unobserved by the gravity vector).
-"""
-
 # ╔═╡ a9a50fb8-98fc-4a9f-9acd-68fb73e28b59
 md"""
 ### Debias Gyro
@@ -70,10 +56,10 @@ We'll use the first couple seconds of the dataframe to estimate gyro bias, and c
 """
 
 # ╔═╡ 3f569091-78a5-4ffb-835b-24e18a26f106
-plot(imu_data[1:1000, 2:4])
+plot(imu_data[1:100, 2:4])
 
 # ╔═╡ ecd3a26c-7438-4aa0-80a8-6ddac6869053
-gyro_bias = mean.(eachcol(imu_data[1:1000, 2:4]))
+gyro_bias = mean.(eachcol(imu_data[1:100, 2:4]))
 
 # ╔═╡ 2e5f5677-71cf-4185-9df5-7f3ac5928b9f
 imu_data[:, 2:4] = imu_data[:, 2:4] .- gyro_bias'
@@ -85,10 +71,10 @@ Estimate gravity measurement from stationary gyrocompass.
 """
 
 # ╔═╡ 1ae0e920-f858-48b5-8a9c-501e6474e989
-plot(imu_data[1:1000, 5:7])
+plot(imu_data[1:100, 5:7])
 
 # ╔═╡ 4d4efd6c-b3cc-4b03-9c4a-259fb63581e9
-acc_cal = mean.(eachcol(imu_data[1:1000, 5:7]))
+acc_cal = mean.(eachcol(imu_data[1:100, 5:7]))
 
 # ╔═╡ f3f2cb1a-125c-450a-a424-f88c183e2367
 calibrated_gravity_magnitude = norm(acc_cal)
@@ -114,11 +100,6 @@ function predict(q, ω, Δt)
 	return (I + 0.5*Δt*Ω)*q
 end
 
-# ╔═╡ 709e4458-275e-4fd8-8a3d-3de8cebf9110
-md"""
-This implementation here is based on a [linearized approximation of the Euler-Rodrigues rotation formula](https://ahrs.readthedocs.io/en/latest/filters/ekf.html#prediction-step), which tells us how to apply integrated angular rates to a given quaternion. Follow the link for more details about how the linearized form was derived. The linearized approximation is suitable for implementing this filter on low-compute embedded platforms.
-"""
-
 # ╔═╡ 38d13e33-1241-488a-8a98-019a24895bd8
 begin
 	# Initial state is identity quaternion
@@ -132,13 +113,6 @@ begin
 
 	plot(trajectory, label=["x" "y" "z"], ylabel="Angle (deg)")
 end
-
-# ╔═╡ a2c2c14a-5221-4cab-b9b4-9347b57fa284
-md"""
-Sweet! Looks like our `predict()` formula is on the right track--it reports our rotations as we expect: A series of +-90° rotations along the roll, pitch, and yaw axes.
-
-We also need to track our uncertainty associated with this prediction, which is given by $P_{predicted} = F_{prev}P_{prev}F_{prev}^T + Q$ where $P$ is the prediction uncertainty, $F$ is the jacobian of our `predict()`-tion model, and $Q$ is the process noise--i.e. how much uncertainty is injected by gyro measurement noise?
-"""
 
 # ╔═╡ 4b744b76-bd4c-403a-b7c9-6a4f462cc17d
 function prediction_noise(prev_noise, q, σ, ω, Δt)
@@ -180,11 +154,6 @@ function measurement_model(q, gravity=[0; 0; -1])
 	# We can compute where the gravity vector is pointing by simply rotating a unit-z vector representing gravity in the `q_predicted` direction
 	return quat2mat(q)'*gravity
 end
-
-# ╔═╡ c6aaddec-195b-45c9-961c-c6d2dba1d7f0
-md"""
-Next we can start working on the correction equations, which use the measurement model (and its jacobian `H`) to apply the shift. The actual jacobian for quaternion rotation is kinda nasty so we'll cheat and use auto-differentiation shortcuts for brevity.
-"""
 
 # ╔═╡ ba4c1fd0-ccc8-4e80-b791-697c099560b1
 measurement_model_jac(q) = ForwardDiff.jacobian(measurement_model, q)
@@ -348,7 +317,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.8.3"
 manifest_format = "2.0"
-project_hash = "7b0400c8be2b97f361762315648bfe51f8ec6df9"
+project_hash = "acd7b4ff51c32516f644c05146770195ff299048"
 
 [[deps.AbstractAlgebra]]
 deps = ["GroupsCore", "InteractiveUtils", "LinearAlgebra", "MacroTools", "Markdown", "Random", "RandomExtensions", "SparseArrays", "Test"]
@@ -1739,10 +1708,8 @@ version = "1.4.1+0"
 # ╠═25eeeab2-ca14-4793-a413-18a84be40a83
 # ╟─dee4d1fa-bb8a-11ed-1bc1-fff3f486280d
 # ╠═bd12a7a7-709b-46c4-b364-76e58224c032
-# ╟─a2bca4bc-b9c3-47f4-bef5-8c6b5e52eb41
 # ╠═d09c9c28-e5dc-43f2-be1c-5c7be58c5bff
 # ╠═480a41a6-8533-4092-8f30-ebc111f949c6
-# ╟─666c6045-1984-4988-a2fa-e153fbac05c8
 # ╟─a9a50fb8-98fc-4a9f-9acd-68fb73e28b59
 # ╠═3f569091-78a5-4ffb-835b-24e18a26f106
 # ╠═ecd3a26c-7438-4aa0-80a8-6ddac6869053
@@ -1754,13 +1721,10 @@ version = "1.4.1+0"
 # ╠═3003ec21-8327-4a03-a12b-925783100e40
 # ╟─1415aaef-0709-4bdd-9175-f6e2939acbb6
 # ╠═f0cc0ab4-ea55-412b-abf2-0eb06f275fe6
-# ╟─709e4458-275e-4fd8-8a3d-3de8cebf9110
 # ╠═38d13e33-1241-488a-8a98-019a24895bd8
-# ╟─a2c2c14a-5221-4cab-b9b4-9347b57fa284
 # ╠═4b744b76-bd4c-403a-b7c9-6a4f462cc17d
 # ╠═1fcb3e87-e0e7-4211-809d-fa041194d7e0
 # ╠═08c6d36c-1aeb-4464-a422-6c2e351b3e45
-# ╟─c6aaddec-195b-45c9-961c-c6d2dba1d7f0
 # ╠═ba4c1fd0-ccc8-4e80-b791-697c099560b1
 # ╠═1eaa45d0-6062-48c1-a12b-e49d448e31c8
 # ╠═f1780048-3c9d-43b6-b47f-ef157b3781fc

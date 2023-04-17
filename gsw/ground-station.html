@@ -75,9 +75,11 @@
       })();
 
       // plot data
-      $.plot($("#gyroPlotContainer"), [0, 1, 2].map((j) => parsed_log['timestamp'].map((e, i) => [e, parsed_log['gyro'][i][j]])));
-      $.plot($("#accPlotContainer"), [0, 1, 2].map((j) => parsed_log['timestamp'].map((e, i) => [e, parsed_log['acc'][i][j]])));
-      $.plot($("#cycleSlackPlotContainer"), [parsed_log['timestamp'].map((e, i) => [e, parsed_log['cycle_slack'][i]])]);
+      all_plots = [
+        $.plot($("#gyroPlotContainer"), [0, 1, 2].map((j) => parsed_log['timestamp'].map((e, i) => [e, parsed_log['gyro'][i][j]]))),
+        $.plot($("#accPlotContainer"), [0, 1, 2].map((j) => parsed_log['timestamp'].map((e, i) => [e, parsed_log['acc'][i][j]]))),
+        $.plot($("#cycleSlackPlotContainer"), [parsed_log['timestamp'].map((e, i) => [e, parsed_log['cycle_slack'][i]])]),
+      ];
 
       // setup timeline slider
       $("#timelineSlider").val(0);
@@ -87,14 +89,37 @@
         }
 
         const index = Math.floor((this.value/1000.0) * parsed_log['timestamp'].length);
-        $("#timestampContainer").text("ts="+parsed_log['timestamp'][index]);
-        const quat = parsed_log["nav"][index];
-        const local_att = Cesium.Quaternion.multiply(orientation, new Cesium.Quaternion(quat[1], quat[2], quat[3], quat[0]), {});
+        const ts = parsed_log['timestamp'][index];
+        $("#timestampContainer").text("ts="+ts.toFixed(5));
+        quat = parsed_log["nav"][index];
+        quat = new Cesium.Quaternion(quat[1], quat[2], quat[3], quat[0]);
+
+        const enu_hpr = Cesium.HeadingPitchRoll.fromQuaternion(quat);
+        const ned_hpr = new Cesium.HeadingPitchRoll(-enu_hpr.heading, -enu_hpr.pitch, enu_hpr.roll);
+        $("#headingContainer").text(Cesium.Math.toDegrees(ned_hpr.heading).toFixed(3));
+        $("#pitchContainer").text(Cesium.Math.toDegrees(ned_hpr.pitch).toFixed(3));
+        $("#rollContainer").text(Cesium.Math.toDegrees(ned_hpr.roll).toFixed(3));
+
+        const local_att = Cesium.Quaternion.multiply(orientation, quat, {});
         const rot_model = Cesium.Quaternion.fromHeadingPitchRoll(new Cesium.HeadingPitchRoll(0, 0, Cesium.Math.toRadians(180)));
         vehicle_entity.orientation = Cesium.Quaternion.multiply(local_att, rot_model, {});
 
+        // TODO update global vehicle pose here
         // vehicle_entity.position = Cesium.Cartesian3.fromDegrees(-122.410474, 37.745606, 300.0);
         // console.log(vehicle_entity.position);
+      });
+
+      $("#timelineSlider").on('mouseup', function()
+      {
+        const index = Math.floor((this.value/1000.0) * parsed_log['timestamp'].length);
+        const ts = parsed_log['timestamp'][index];
+
+        // draw marking on plots
+        all_plots.forEach(function(e) {
+          e.getOptions().grid.markings = [];
+          e.getOptions().grid.markings.push({ xaxis: { from: ts, to: ts }, color: "#ff8888" });
+          e.draw();
+        });
       });
 
     }
@@ -145,7 +170,15 @@
       <h4>Cycle Slack</h4>
       <div id="cycleSlackPlotContainer" style="width:100%;height:300px"></div>
     </div>
-    <div id="cesiumContainer" style="width:60%;height:100%"></div>
+
+    <div style="width:60%;height:100%">
+      <div class="flex-container" style="font-size:1.5em;">
+        <div style="width:33%">Heading: <span id="headingContainer"></span>&#176;</div>
+        <div style="width:33%">Pitch: <span id="pitchContainer"></span>&#176;</div>
+        <div style="width:33%">Roll: <span id="rollContainer"></span>&#176;</div>
+      </div>
+      <div id="cesiumContainer" style="width:100%;height:100%"></div>
+    </div>
   </div>
 
  </div>

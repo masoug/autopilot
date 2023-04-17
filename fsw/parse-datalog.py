@@ -76,7 +76,14 @@ def main(args):
         ts = float(frame[0])
         if prev_ts:
             if ts < prev_ts:
-                print('possible corrupt frame, skipping')
+                print('backwards timestamp, skipping')
+                print(f'ts={ts} prev_ts={prev_ts}')
+                buf = fp.read(FRAME_LEN+1)
+                continue
+            elif abs(ts - prev_ts) > 1.0:
+                print('excessive jump in timestamp, skipping')
+                print(f'ts={ts} prev_ts={prev_ts}')
+                buf = fp.read(FRAME_LEN+1)
                 continue
         prev_ts = ts
 

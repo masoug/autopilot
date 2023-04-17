@@ -75,14 +75,49 @@ void measurement_jacobian(
 
 }
 
-EKF::EKF(const float gyro_noise, const float acc_noise)
+EKF::EKF(const float gyro_noise,
+         const float acc_noise)
     : m_gyro_noise(gyro_noise)
     , m_gyro_noise_sq(gyro_noise*gyro_noise)
     , m_acc_noise(acc_noise)
     , m_gravity(0.0, 0.0, -1.0)
+    , m_gravity_norm(9.81)
+    , m_gyro_bias(Eigen::Vector3f::Zero())
+    , m_cal_iterations(0)
     , m_att_q(1.0, 0.0, 0.0, 0.0)
     , m_att_cov(Eigen::Matrix4f::Identity())
 {
+}
+
+void
+EKF::stepGyrocompass(
+        const Eigen::Vector3f &gyro,
+        const Eigen::Vector3f& acc)
+{
+    m_gyro_bias += gyro;
+    m_gravity += acc;
+    m_cal_iterations++;
+}
+
+void
+EKF::completeGyrocompass()
+{
+    if (m_cal_iterations > 0)
+    {
+        const auto denominator = static_cast<float>(m_cal_iterations);
+        m_gyro_bias /= denominator;
+        m_gravity /= denominator;
+
+        m_gravity_norm = m_gravity.norm();
+        m_gravity /= m_gravity_norm;
+        m_cal_iterations = 0;
+    }
+    else
+    {
+        m_gyro_bias.fill(0.0f);
+        m_gravity << 0.0f, 0.0f, -1.0f;
+        m_gravity_norm = 9.81;
+    }
 }
 
 const Eigen::Vector4f&
@@ -91,8 +126,10 @@ EKF::getState() const {
 }
 
 void
-EKF::predict(const Eigen::Vector3f &gyro, const float delta_t)
+EKF::predict(const Eigen::Vector3f &raw_gyro, const float delta_t)
 {
+    const Eigen::Vector3f gyro = raw_gyro - m_gyro_bias;
+
     // Big idea: Predict the next state by integrating angular rates `ω` by `Δt`,
     // and adding that to current_state `q`.
     m_omega <<    0.0f, -gyro[0], -gyro[1], -gyro[2],
@@ -140,30 +177,44 @@ EKF::step(const Eigen::Vector3f& gyro,
           const Eigen::Vector3f& acc,
           const float delta_t)
 {
+    if (m_cal_iterations) {
+        // Error: Gyrocompass incomplete!
+        return;
+    }
+
     // Predict!
     predict(gyro, delta_t);
 
-    // update modeled gravity
-    measurement();
+    // Ignore gravity if magnitude is far from calibrated value
+    const auto acc_norm = acc.norm();
+    if (std::fabs(acc_norm - m_gravity_norm) > 0.1f)
+    {
+        // skip the update and just copy the predicted values over
+        m_att_q = m_att_q_pred;
+        m_att_cov = m_att_q_pred_cov;
+    }
+    else
+    {
+        // update modeled gravity
+        measurement();
 
-    // TODO: Ignore gravity if magnitude is not close to 9.81!!
+        // normalize gravity vector since we only care about direction
+        m_z = acc / acc_norm;
 
-    // Normalize gravity vector since we only care about direction
-    m_z = acc.normalized();
+        // observation error
+        m_error = m_z - m_modeled_gravity;
 
-    // observation error
-    m_error = m_z - m_modeled_gravity;
+        // observation noise
+        const Eigen::Matrix3f R = m_acc_noise * Eigen::Matrix3f::Identity();
 
-    // observation noise
-    const Eigen::Matrix3f R = m_acc_noise*Eigen::Matrix3f::Identity();
+        // kalman gain
+        const Eigen::Matrix3f S = m_H * m_att_q_pred_cov * m_H.transpose() + R;
+        const Eigen::Matrix<float, 4, 3> K = m_att_q_pred_cov * m_H.transpose() * S.inverse();
 
-    // kalman gain
-    const Eigen::Matrix3f S = m_H*m_att_q_pred_cov*m_H.transpose() + R;
-    const Eigen::Matrix<float, 4, 3> K = m_att_q_pred_cov*m_H.transpose()*S.inverse();
+        // apply corrections
+        m_att_q = (m_att_q_pred + K * m_error).normalized();
 
-    // apply corrections
-    m_att_q = (m_att_q_pred + K*m_error).normalized();
-
-    // update covariance
-    m_att_cov = (Eigen::Matrix4f::Identity()-K*m_H)*m_att_q_pred_cov;
+        // update covariance
+        m_att_cov = (Eigen::Matrix4f::Identity() - K * m_H) * m_att_q_pred_cov;
+    }
 }

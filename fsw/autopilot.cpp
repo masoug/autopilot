@@ -1,9 +1,3 @@
-/**
- * Copyright (c) 2020 Raspberry Pi (Trading) Ltd.
- *
- * SPDX-License-Identifier: BSD-3-Clause
- */
-
 #include <cstdio>
 
 #include "pico/stdlib.h"
@@ -32,12 +26,20 @@ int main()
     Datalogger dlog;
 
     // give some time for the peripherals to warm up
-    for (int i = 0; i < 10; i++)
+    // and calibrate imus in the meantime
+    for (int i = 0; i < 300; i++)
     {
-        imu.read();
-        sleep_ms(300);
+        if (imu.read() == 14)
+        {
+            // calibrate imu to initialize biases
+            ekf.stepGyrocompass(imu.getGyro(), imu.getAcc());
+        }
+        sleep_ms(10);
     }
+    ekf.completeGyrocompass();
 
+#pragma clang diagnostic push
+#pragma ide diagnostic ignored "EndlessLoop"
     LoopRate rate(10);
     uint8_t cycle_counter = 0;
     float prev_ts = -1.0;
@@ -45,9 +47,9 @@ int main()
     while (true)
     {
         const float ts = to_us_since_boot(get_absolute_time()) * 1e-6f;
-        if (prev_ts < 0.0)
+        if (prev_ts < 0.0f)
         {
-            prev_ts = ts - 0.01;
+            prev_ts = ts - 0.01f;
         }
         const float delta_t = ts - prev_ts;
         prev_ts = ts;
@@ -79,7 +81,7 @@ int main()
             cycle_counter = 0;
         }
 
-        // Output telemetry
+        // Save to data log
         dlog.write(ts,
                    imu.getRawAcc(),
                    imu.getRawGyro(),
@@ -89,5 +91,6 @@ int main()
         cycle_slack = rate.wait();
         cycle_counter++;
     }
+#pragma clang diagnostic pop
     return 0;
 }

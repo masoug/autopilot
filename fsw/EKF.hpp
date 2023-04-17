@@ -9,6 +9,12 @@ public:
     explicit EKF(float gyro_noise=0.4,
                  float acc_noise=1.0);
 
+    void stepGyrocompass(
+            const Eigen::Vector3f& gyro,
+            const Eigen::Vector3f& acc);
+
+    void completeGyrocompass();
+
     void
     step(const Eigen::Vector3f& gyro,
          const Eigen::Vector3f& acc,
@@ -36,7 +42,11 @@ private:
     const float m_gyro_noise;
     const float m_gyro_noise_sq;
     const float m_acc_noise;
-    const Eigen::Vector3f m_gravity;
+    Eigen::Vector3f m_gravity;
+    float m_gravity_norm;
+
+    Eigen::Vector3f m_gyro_bias;
+    uint16_t m_cal_iterations;
 
     // attitude state quaternion & covariance
     Eigen::Vector4f m_att_q;
