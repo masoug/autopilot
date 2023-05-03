@@ -28,7 +28,11 @@ add_compile_options(-Wall
 if (TARGET tinyusb_device)
     add_executable(autopilot
             autopilot.cpp
-            LoopRate.cpp LoopRate.hpp IMU.cpp IMU.hpp EKF.cpp EKF.hpp Datalogger.cpp Datalogger.hpp utils.cpp utils.hpp)
+            LoopRate.cpp LoopRate.hpp
+            IMU.cpp IMU.hpp
+            EKF.cpp EKF.hpp
+            Datalogger.cpp Datalogger.hpp
+            utils.cpp utils.hpp)
 
     # pull in common dependencies
     target_link_libraries(autopilot pico_stdlib hardware_i2c)
@@ -42,6 +46,14 @@ if (TARGET tinyusb_device)
 
     # create map/bin/hex/uf2 file etc.
     pico_add_extra_outputs(autopilot)
+
+    # Gps test
+    add_executable(gps-test gps-test.cpp)
+    target_link_libraries(gps-test pico_stdlib hardware_i2c)
+    pico_enable_stdio_usb(gps-test 1)
+    pico_enable_stdio_uart(gps-test 0)
+    pico_add_extra_outputs(gps-test)
+
 
 elseif(PICO_ON_DEVICE)
     message(WARNING "not building autopilot because TinyUSB submodule is not initialized in the SDK")
