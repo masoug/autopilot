@@ -54,6 +54,15 @@ if (TARGET tinyusb_device)
     pico_enable_stdio_uart(gps-test 0)
     pico_add_extra_outputs(gps-test)
 
+    # Nav tests
+    add_executable(nav-tests nav-tests.cpp utils.cpp)
+    target_include_directories(nav-tests PRIVATE
+            /Users/sammy/Dropbox/robotics/autopilot/eigen/_install/include)
+    target_link_libraries(nav-tests pico_stdlib)
+    pico_enable_stdio_usb(nav-tests 1)
+    pico_enable_stdio_uart(nav-tests 0)
+    pico_add_extra_outputs(nav-tests)
+
 
 elseif(PICO_ON_DEVICE)
     message(WARNING "not building autopilot because TinyUSB submodule is not initialized in the SDK")

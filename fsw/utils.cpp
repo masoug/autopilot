@@ -3,6 +3,11 @@
 
 namespace {
 
+constexpr double DEG2RAD = M_PI / 180.0;
+
+constexpr double EARTH_RAD = 6378137.0;
+constexpr double ONE_MINUS_ECC = 1.0-6.69437999014e-3;
+
 const uint8_t CRC_TABLE[] = {
     0x00, 0x07, 0x0e, 0x09, 0x1c, 0x1b, 0x12, 0x15, 0x38, 0x3f, 0x36, 0x31,
     0x24, 0x23, 0x2a, 0x2d, 0x70, 0x77, 0x7e, 0x79, 0x6c, 0x6b, 0x62, 0x65,
@@ -42,6 +47,71 @@ crc8(const uint8_t* buf, const size_t len)
         checksum = CRC_TABLE[checksum ^ buf[i]];
 
     return checksum;
+}
+
+// Geographics formulae copied from
+// https://github.com/NavPy/NavPy/blob/master/navpy/core/navpy.py
+Eigen::Vector3d
+LocalNED::lla2ecef(const float lat, const float lon, const float alt)
+{
+    const double cos_lat = std::cos(DEG2RAD * static_cast<double>(lat));
+    const double cos_lon = std::cos(DEG2RAD * static_cast<double>(lon));
+    const double sin_lat = std::sin(DEG2RAD * static_cast<double>(lat));
+    const double sin_lon = std::sin(DEG2RAD * static_cast<double>(lon));
+    const double radius = EARTH_RAD + alt;
+
+    const double x = radius*cos_lat*cos_lon;
+    const double y = radius*cos_lat*sin_lon;
+    const double z = (ONE_MINUS_ECC*EARTH_RAD + alt)*sin_lat;
+
+    return {x, y, z};
+}
+
+Eigen::Matrix3d
+LocalNED::rotNED(float lat, float lon)
+{
+    const double cos_lat = std::cos(DEG2RAD * static_cast<double>(lat));
+    const double cos_lon = std::cos(DEG2RAD * static_cast<double>(lon));
+    const double sin_lat = std::sin(DEG2RAD * static_cast<double>(lat));
+    const double sin_lon = std::sin(DEG2RAD * static_cast<double>(lon));
+
+    Eigen::Matrix3d R;
+    // C[0,0]=-np.sin(lat_ref)*np.cos(lon_ref)
+    R(0, 0) = -sin_lat*cos_lon;
+    // C[0,1]=-np.sin(lat_ref)*np.sin(lon_ref)
+    R(0, 1) = -sin_lat*sin_lon;
+    //C[0,2]= np.cos(lat_ref)
+    R(0, 2) = cos_lat;
+
+    // C[1,0]=-np.sin(lon_ref)
+    R(1, 0) = -sin_lon;
+    // C[1,1]= np.cos(lon_ref)
+    R(1, 1) = cos_lon;
+    // C[1,2]= 0
+    R(1, 2) = 0.0;
+
+    // C[2,0]=-np.cos(lat_ref)*np.cos(lon_ref)
+    R(2, 0) = -cos_lat*cos_lon;
+    // C[2,1]=-np.cos(lat_ref)*np.sin(lon_ref)
+    R(2, 1) = -cos_lat*sin_lon;
+    // C[2,2]=-np.sin(lat_ref)
+    R(2, 2) = -sin_lat;
+
+    return R;
+}
+
+LocalNED::LocalNED(const float lat, const float lon, const float alt)
+    : m_origin(lla2ecef(lat, lon, alt))
+    , m_R(rotNED(lat, lon))
+{
+}
+
+Eigen::Vector3f
+LocalNED::lla2ned(const float lat, const float lon, const float alt) const
+{
+    const Eigen::Vector3d local = lla2ecef(lat, lon, alt) - m_origin;
+    const Eigen::Vector3d ned = m_R*local;
+    return ned.cast<float>();
 }
 
 }
